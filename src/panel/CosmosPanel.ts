@@ -17,8 +17,23 @@ export class CosmosPanel {
 
     this.panel.onDidDispose(() => this.dispose());
 
-    this.panel.webview.onDidReceiveMessage((message) => {
+    this.panel.webview.onDidReceiveMessage(async (message: any) => {
       logger.log('Message received from webview', message);
+
+      if (message.type === 'OPEN_FILE') {
+        const fileId = message.payload.fileId;
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspaceRoot) { return; }
+
+        const fullPath = vscode.Uri.file(
+          require('path').join(workspaceRoot, fileId)
+        );
+        await vscode.window.showTextDocument(fullPath, {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: true
+        });
+        logger.log(`Opened file: ${fileId}`);
+      }
     });
   }
 
@@ -79,6 +94,20 @@ export class CosmosPanel {
         </head>
         <body>
           <canvas id="cosmos-canvas" style="width:100%;height:100%;display:block;"></canvas>
+          <div id="tooltip" style="
+            position: fixed;
+            display: none;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-family: sans-serif;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 100;
+            line-height: 1.6;
+          "></div>
           <script src="${scriptUri}"></script>
         </body>
       </html>

@@ -5,6 +5,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CosmosData } from '../../src/types';
 import { Star } from './Star';
 import { Planet } from './Planet';
+import { DependencyLine } from './DependencyLine';
+import { CosmosDependency } from '../../src/types';
+import { sendToExtension } from '../bridge/messageBridge';
 
 export class Universe {
   private scene: THREE.Scene;
@@ -13,6 +16,11 @@ export class Universe {
   private controls: OrbitControls;
   private stars: Map<string, Star> = new Map();
   private planets: Map<string, Planet> = new Map();
+  private lines: DependencyLine[] = [];
+  private raycaster = new THREE.Raycaster();
+  private mouse = new THREE.Vector2();
+  private data: CosmosData | null = null;
+  private dependencies: CosmosDependency[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     // Scene
@@ -48,6 +56,8 @@ export class Universe {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
 
+    canvas.addEventListener('click', (event) => this.onClick(event, canvas));
+    canvas.addEventListener('mousemove', (event) => this.onMouseMove(event, canvas));
     // Handle window resize
     window.addEventListener('resize', () => this.onResize(canvas));
 
@@ -57,6 +67,8 @@ export class Universe {
 
   // Called once with CosmosData to build the universe
   public build(data: CosmosData): void {
+    this.data = data;
+    this.dependencies = data.dependencies;
     this.stars.forEach((star) => this.scene.remove(star.mesh));
     this.planets.forEach((planet) => this.scene.remove(planet.mesh));
 
@@ -87,6 +99,7 @@ export class Universe {
         this.scene.add(planet.mesh);
       });
     });
+    this.drawDependencies(data.dependencies);
   }
 
   // Distributes points evenly across a sphere surface
@@ -130,5 +143,82 @@ export class Universe {
       canvas.clientWidth,
       canvas.clientHeight
     );
+  }
+
+  private drawDependencies(dependencies: CosmosDependency[]): void {
+    dependencies.forEach(dep => {
+      const sourcePlanet = this.planets.get(dep.sourceId);
+      const targetPlanet = this.planets.get(dep.targetId);
+
+      // Both endpoints must exist as planets in the universe
+      if (!sourcePlanet || !targetPlanet) { return; }
+
+      const line = new DependencyLine(
+        dep,
+        sourcePlanet.mesh.position,
+        targetPlanet.mesh.position
+      );
+
+      this.lines.push(line);
+      this.scene.add(line.line);
+    });
+  }
+
+  private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
+    // Convert mouse position to normalized device coordinates (-1 to +1)
+    const rect = canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // Get all planet meshes
+    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
+    const intersects = this.raycaster.intersectObjects(planetMeshes);
+
+    if (intersects.length > 0) {
+      const clicked = intersects[0].object;
+      const fileId = clicked.userData.id;
+      if (fileId) {
+        // Send to extension host to open the file
+        sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
+      }
+    }
+  }
+
+  private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
+    const rect = canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
+    const intersects = this.raycaster.intersectObjects(planetMeshes);
+
+    const tooltip = document.getElementById('tooltip')!;
+
+    if (intersects.length > 0) {
+      const hovered = intersects[0].object;
+      const fileId = hovered.userData.id as string;
+      const file = this.data?.files[fileId];
+      if (!file) { return; }
+
+      // Count how many files this one depends on
+      const dependsOn = this.dependencies.filter(d => d.sourceId === fileId).length;
+      // Count how many files depend on this one
+      const dependedBy = this.dependencies.filter(d => d.targetId === fileId).length;
+
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${event.clientX + 15}px`;
+      tooltip.style.top = `${event.clientY + 15}px`;
+      tooltip.innerHTML = `
+      <strong>${file.name}</strong><br>
+      Type: ${file.extension.toUpperCase()}<br>
+      Depends on: ${dependsOn} files<br>
+      Used by: ${dependedBy} files
+    `;
+    } else {
+      tooltip.style.display = 'none';
+    }
   }
 }
