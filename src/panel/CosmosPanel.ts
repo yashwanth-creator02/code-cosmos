@@ -8,6 +8,8 @@ export class CosmosPanel {
 
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
+  private lastData: unknown = null;
+
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
@@ -16,6 +18,13 @@ export class CosmosPanel {
     this.panel.webview.html = this.getHtmlContent();
 
     this.panel.onDidDispose(() => this.dispose());
+
+    this.panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.visible && this.lastData) {
+        this.panel.webview.postMessage(this.lastData);
+        logger.log('Panel became visible — resending universe data');
+      }
+    });
 
     this.panel.webview.onDidReceiveMessage(async (message: any) => {
       logger.log('Message received from webview', message);
@@ -51,6 +60,7 @@ export class CosmosPanel {
       {
         enableScripts: true,
         localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'out')],
+        retainContextWhenHidden: true,
       }
     );
 
@@ -59,9 +69,12 @@ export class CosmosPanel {
     return CosmosPanel.instance;
   }
 
-  public sendMessage(message: unknown): void {
+  public sendMessage(message: any): void {
     this.panel.webview.postMessage(message);
-    logger.log('CosmosPanel.sendMessage', message);
+    if (message.type === 'LOAD_UNIVERSE') {
+      this.lastData = message;
+    }
+    logger.log('CosmosPanel.sendMessage', message.type);
   }
 
   private getHtmlContent(): string {

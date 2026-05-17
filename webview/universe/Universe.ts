@@ -21,6 +21,9 @@ export class Universe {
   private mouse = new THREE.Vector2();
   private data: CosmosData | null = null;
   private dependencies: CosmosDependency[] = [];
+  private focusedFileId: string | null = null;
+
+
 
   constructor(canvas: HTMLCanvasElement) {
     // Scene
@@ -61,6 +64,9 @@ export class Universe {
     // Handle window resize
     window.addEventListener('resize', () => this.onResize(canvas));
 
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { this.exitFocusMode(); }
+    });
     // Start the animation loop
     this.animate();
   }
@@ -165,24 +171,30 @@ export class Universe {
   }
 
   private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
-    // Convert mouse position to normalized device coordinates (-1 to +1)
     const rect = canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
-
-    // Get all planet meshes
     const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
     const intersects = this.raycaster.intersectObjects(planetMeshes);
 
     if (intersects.length > 0) {
       const clicked = intersects[0].object;
-      const fileId = clicked.userData.id;
-      if (fileId) {
-        // Send to extension host to open the file
+      const fileId = clicked.userData.id as string;
+
+      if (this.focusedFileId === fileId) {
+        // Clicking same planet again — exit focus mode
+        this.exitFocusMode();
+      } else {
+        // Enter focus mode on this planet
+        this.enterFocusMode(fileId);
+        // Open file in editor
         sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
       }
+    } else {
+      // Clicked empty space — exit focus mode
+      this.exitFocusMode();
     }
   }
 
@@ -220,5 +232,74 @@ export class Universe {
     } else {
       tooltip.style.display = 'none';
     }
+  }
+
+  private enterFocusMode(fileId: string): void {
+    this.focusedFileId = fileId;
+
+    // Find all files directly connected to this one
+    const connectedIds = new Set<string>();
+    connectedIds.add(fileId);
+
+    this.dependencies.forEach(dep => {
+      if (dep.sourceId === fileId) { connectedIds.add(dep.targetId); }
+      if (dep.targetId === fileId) { connectedIds.add(dep.sourceId); }
+    });
+
+    // Fade all unrelated planets
+    this.planets.forEach((planet, id) => {
+      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+      if (connectedIds.has(id)) {
+        material.opacity = 1;
+        material.transparent = false;
+      } else {
+        material.opacity = 0.05;
+        material.transparent = true;
+      }
+    });
+
+    // Fade all unrelated stars
+    this.stars.forEach((star) => {
+      const material = star.mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = 0.05;
+      material.transparent = true;
+    });
+
+    // Fade unrelated lines — keep only lines connecting to focused planet
+    this.lines.forEach((depLine) => {
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      const isConnected =
+        depLine.dependency.sourceId === fileId ||
+        depLine.dependency.targetId === fileId;
+      if (isConnected) {
+        material.opacity = 0.9;
+      } else {
+        material.opacity = 0.02;
+      }
+    });
+  }
+
+  private exitFocusMode(): void {
+    this.focusedFileId = null;
+
+    // Restore all planets
+    this.planets.forEach((planet) => {
+      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = 1;
+      material.transparent = false;
+    });
+
+    // Restore all stars
+    this.stars.forEach((star) => {
+      const material = star.mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = 1;
+      material.transparent = false;
+    });
+
+    // Restore all lines to original opacity
+    this.lines.forEach((depLine) => {
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      material.opacity = 0.4;
+    });
   }
 }
