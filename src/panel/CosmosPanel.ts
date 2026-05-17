@@ -78,9 +78,7 @@ export class CosmosPanel {
           </style>
         </head>
         <body>
-          <h1 style="color: white; font-family: sans-serif; padding: 20px;">
-            Code Cosmos Loading...
-          </h1>
+          <canvas id="cosmos-canvas" style="width:100%;height:100%;display:block;"></canvas>
           <script src="${scriptUri}"></script>
         </body>
       </html>

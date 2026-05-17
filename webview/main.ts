@@ -1,13 +1,21 @@
 // webview/main.ts
 
 import { sendToExtension, onMessageFromExtension } from './bridge/messageBridge';
+import { Universe } from './universe/Universe';
+import { CosmosData } from '../src/types';
 
-// Listen for messages from the extension host
-onMessageFromExtension((message) => {
-  console.log('[Code Cosmos Webview] message from extension:', message);
+let universe: Universe | null = null;
 
+// Wait for DOM to be ready before touching the canvas
+window.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('cosmos-canvas') as HTMLCanvasElement;
+  universe = new Universe(canvas);
 });
 
-// Signal to the extension host that the webview is ready to receive data
-// We do this AFTER setting up the listener so we don't miss any messages
+onMessageFromExtension((message: any) => {
+  if (message.type === 'LOAD_UNIVERSE' && universe) {
+    universe.build(message.payload as CosmosData);
+  }
+});
+
 sendToExtension({ type: 'READY' });
