@@ -8,6 +8,7 @@ import { Planet } from './Planet';
 import { DependencyLine } from './DependencyLine';
 import { CosmosDependency } from '../../src/types';
 import { sendToExtension } from '../bridge/messageBridge';
+import { CosmosFolder } from '../../src/types';
 
 export class Universe {
   private scene: THREE.Scene;
@@ -23,12 +24,18 @@ export class Universe {
   private dependencies: CosmosDependency[] = [];
   private focusedFileId: string | null = null;
   private defaultCameraPosition = new THREE.Vector3(0, 0, 1000);
+  private centralCore: THREE.Mesh | null = null;
+  private spacecraftMode = false;
+  private keys: Record<string, boolean> = {};
+  private pitch = 0; // up/down rotation
+  private yaw = 0;   // left/right rotation
 
 
   constructor(canvas: HTMLCanvasElement) {
     // Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
+    this.scene.fog = new THREE.FogExp2(0x000000, 0.00008);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(
@@ -56,15 +63,32 @@ export class Universe {
     // Orbit controls — zoom, pan, rotate
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
+    this.controls.minDistance = 10;
+    this.controls.maxDistance = 8000;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.rotateSpeed = 0.8;
+    this.controls.zoomSpeed = 1.2;
+    this.controls.panSpeed = 0.8;
 
     canvas.addEventListener('click', (event) => this.onClick(event, canvas));
     canvas.addEventListener('mousemove', (event) => this.onMouseMove(event, canvas));
+    canvas.addEventListener('mouseleave', () => {
+      const tooltip = document.getElementById('tooltip')!;
+      tooltip.style.display = 'none';
+    });
+
     // Handle window resize
     window.addEventListener('resize', () => this.onResize(canvas));
 
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { this.exitFocusMode(); }
     });
+
+    this.initSpacecraftMode();
+    this.initSearch();
+    this.initResetButton();
+    this.addBackgroundStars();
     // Start the animation loop
     this.animate();
   }
@@ -79,12 +103,14 @@ export class Universe {
     this.stars.clear();
     this.planets.clear();
 
+    this.addCentralBody(data.folders[data.rootFolderId]);
     // Place stars using golden angle distribution
     const folderIds = Object.keys(data.folders);
     folderIds.forEach((folderId, index) => {
       const folder = data.folders[folderId];
       const position = this.goldenAnglePosition(index, folderIds.length, 500);
       const star = new Star(folder, position);
+      star.mesh.userData = { type: 'star', id: folderId, name: folder.name };
       this.stars.set(folderId, star);
       this.scene.add(star.light);
       this.scene.add(star.mesh);
@@ -105,9 +131,6 @@ export class Universe {
       });
     });
     this.drawDependencies(data.dependencies);
-    this.initSearch();
-    this.initResetButton();
-    this.addBackgroundStars();
   }
 
   // Distributes points evenly across a sphere surface
@@ -134,13 +157,6 @@ export class Universe {
       starPosition.y + (Math.random() - 0.5) * 20,
       starPosition.z + radius * Math.sin(angle)
     );
-  }
-
-  // Animation loop — runs every frame
-  private animate(): void {
-    requestAnimationFrame(() => this.animate());
-    this.controls.update();
-    this.renderer.render(this.scene, this.camera);
   }
 
   // Handle canvas resize
@@ -206,21 +222,56 @@ export class Universe {
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
-    const intersects = this.raycaster.intersectObjects(planetMeshes);
-
     const tooltip = document.getElementById('tooltip')!;
+    const allMeshes = [
+      ...Array.from(this.planets.values()).map(p => p.mesh),
+      ...Array.from(this.stars.values()).map(s => s.mesh),
+    ];
+    if (this.centralCore) { allMeshes.push(this.centralCore); }
+
+    const intersects = this.raycaster.intersectObjects(allMeshes);
 
     if (intersects.length > 0) {
       const hovered = intersects[0].object;
-      const fileId = hovered.userData.id as string;
-      const file = this.data?.files[fileId];
+
+      if (hovered.userData.type === 'central') {
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${event.clientX + 15}px`;
+        tooltip.style.top = `${event.clientY + 15}px`;
+        tooltip.innerHTML = `
+      <strong>⭐ ${hovered.userData.name}</strong><br>
+      Root Repository<br>
+      ${Object.keys(this.data!.files).length} total files<br>
+      ${Object.keys(this.data!.folders).length} total folders
+    `;
+        return;
+      }
+
+      if (hovered.userData.type === 'star') {
+        const folderId = hovered.userData.id as string;
+        const folder = this.data!.folders[folderId];
+        if (!folder) { return; }
+
+        const fileCount = folder.fileIds.length;
+        const subFolderCount = folder.childFolderIds.length;
+
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${event.clientX + 15}px`;
+        tooltip.style.top = `${event.clientY + 15}px`;
+        tooltip.innerHTML = `
+          <strong>📁 ${folder.name}</strong><br>
+          Files: ${fileCount}<br>
+          Subfolders: ${subFolderCount}
+        `;
+        return;
+      }
+
+      const hoveredFileId = hovered.userData.id as string;
+      const file = this.data?.files[hoveredFileId];
       if (!file) { return; }
 
-      // Count how many files this one depends on
-      const dependsOn = this.dependencies.filter(d => d.sourceId === fileId).length;
-      // Count how many files depend on this one
-      const dependedBy = this.dependencies.filter(d => d.targetId === fileId).length;
+      const dependsOn = this.dependencies.filter(d => d.sourceId === hoveredFileId).length;
+      const dependedBy = this.dependencies.filter(d => d.targetId === hoveredFileId).length;
 
       tooltip.style.display = 'block';
       tooltip.style.left = `${event.clientX + 15}px`;
@@ -479,5 +530,168 @@ export class Universe {
 
     const stars = new THREE.Points(geometry, material);
     this.scene.add(stars);
+  }
+
+  private addCentralBody(rootFolder: CosmosFolder): void {
+    // Core sphere
+    const coreGeometry = new THREE.SphereGeometry(40, 32, 32);
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfff5c0,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.8,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    this.centralCore = core;
+    this.scene.add(core);
+
+    // Inner glow layer
+    const glowGeometry = new THREE.SphereGeometry(55, 32, 32);
+    const glowMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff8800,
+      emissive: 0xff6600,
+      emissiveIntensity: 0.4,
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.BackSide,
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    this.scene.add(glow);
+
+    // Outer glow layer
+    const outerGlowGeometry = new THREE.SphereGeometry(75, 32, 32);
+    const outerGlowMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff4400,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.2,
+      transparent: true,
+      opacity: 0.06,
+      side: THREE.BackSide,
+    });
+    const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+    this.scene.add(outerGlow);
+
+    // Powerful central light illuminating everything
+    const centralLight = new THREE.PointLight(0xffaa44, 2, 3000);
+    centralLight.position.set(0, 0, 0);
+    this.scene.add(centralLight);
+
+    // Label — repo name
+    // Store mesh userData for hover
+    core.userData = { type: 'central', name: rootFolder.name };
+  }
+
+  private initSpacecraftMode(): void {
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.key.toLowerCase()] = true;
+
+      // Toggle spacecraft mode with F key
+      if (e.key === 'f' && !e.ctrlKey) {
+        this.spacecraftMode = !this.spacecraftMode;
+        this.showModeIndicator(this.spacecraftMode);
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.key.toLowerCase()] = false;
+    });
+
+    this.renderer.domElement.addEventListener('click', () => {
+      if (this.spacecraftMode) {
+        this.renderer.domElement.requestPointerLock();
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!this.spacecraftMode) { return; }
+      if (document.pointerLockElement !== this.renderer.domElement) { return; }
+
+      const sensitivity = 0.001;
+      this.yaw -= e.movementX * sensitivity;
+      this.pitch -= e.movementY * sensitivity;
+
+      // Clamp pitch so you can't flip upside down
+      this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+
+      // Apply rotation to camera
+      const quaternion = new THREE.Quaternion();
+      const pitchQuat = new THREE.Quaternion();
+      const yawQuat = new THREE.Quaternion();
+
+      yawQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+      pitchQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch);
+
+      quaternion.multiplyQuaternions(yawQuat, pitchQuat);
+      this.camera.quaternion.copy(quaternion);
+    });
+
+    // Release pointer lock when exiting spacecraft mode
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== this.renderer.domElement) {
+        // Pointer lock released — sync yaw/pitch with current camera rotation
+        const euler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+        this.yaw = euler.y;
+        this.pitch = euler.x;
+      }
+    });
+  }
+
+  private updateSpacecraft(): void {
+    if (!this.spacecraftMode) { return; }
+
+    const speed = this.keys['shift'] ? 50 : 3;
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+
+    this.camera.getWorldDirection(forward);
+    right.crossVectors(forward, this.camera.up).normalize();
+    up.copy(this.camera.up).normalize();
+
+    if (this.keys['w']) { this.camera.position.addScaledVector(forward, speed); }
+    if (this.keys['s']) { this.camera.position.addScaledVector(forward, -speed); }
+    if (this.keys['a']) { this.camera.position.addScaledVector(right, -speed); }
+    if (this.keys['d']) { this.camera.position.addScaledVector(right, speed); }
+    if (this.keys['q']) { this.camera.position.addScaledVector(up, speed); }
+    if (this.keys['e']) { this.camera.position.addScaledVector(up, -speed); }
+
+    // Update orbit controls target to camera direction
+    // So when you switch back to orbit mode it feels natural
+    const target = this.camera.position.clone().add(forward.multiplyScalar(100));
+    this.controls.target.copy(target);
+  }
+
+
+  private animate(): void {
+    requestAnimationFrame(() => this.animate());
+    this.updateSpacecraft();
+
+    if (!this.spacecraftMode) {
+      this.controls.update();
+    }
+
+    // Slowly rotate the central body
+    if (this.centralCore) {
+      this.centralCore.rotation.y += 0.002;
+      this.centralCore.rotation.x += 0.001;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+  private showModeIndicator(spacecraft: boolean): void {
+    const indicator = document.getElementById('mode-indicator');
+
+    if (!indicator) { return; }
+
+    indicator.textContent = spacecraft
+      ? '🚀 Spacecraft Mode — WASD to fly, Click to capture mouse, Esc to release'
+      : '🔭 Orbit Mode — F to switch';
+
+    indicator.style.opacity = '1';
+
+    setTimeout(() => {
+      indicator.style.opacity = '0';
+    }, 2000);
   }
 }

@@ -163,7 +163,22 @@ export class CosmosPanel {
             font-size: 12px;
             cursor: pointer;
             z-index: 100;
-          ">⟳ Reset View</button>
+          ">⟳ Reset View</button>\
+          <div id="mode-indicator" style="
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-family: sans-serif;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 100;
+          "></div>
           <script src="${scriptUri}"></script>
         </body>
       </html>
