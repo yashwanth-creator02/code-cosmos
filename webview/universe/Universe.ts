@@ -22,7 +22,7 @@ export class Universe {
   private data: CosmosData | null = null;
   private dependencies: CosmosDependency[] = [];
   private focusedFileId: string | null = null;
-
+  private defaultCameraPosition = new THREE.Vector3(0, 0, 1000);
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -38,6 +38,7 @@ export class Universe {
       10000
     );
     this.camera.position.z = 1000;
+    this.defaultCameraPosition = this.camera.position.clone();
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -107,6 +108,7 @@ export class Universe {
     });
     this.drawDependencies(data.dependencies);
     this.initSearch();
+    this.initResetButton();
   }
 
   // Distributes points evenly across a sphere surface
@@ -325,6 +327,9 @@ export class Universe {
         container.style.display = 'none';
         this.exitFocusMode();
       }
+      if (e.key === 'r' || e.key === 'R') {
+        this.resetCamera();
+      }
     });
 
     // Filter results as user types
@@ -409,5 +414,49 @@ export class Universe {
     };
 
     fly();
+  }
+
+  private initResetButton(): void {
+    const button = document.getElementById('reset-camera')!;
+
+    button.addEventListener('click', () => {
+      this.resetCamera();
+    });
+
+    button.addEventListener('mouseenter', () => {
+      button.style.background = 'rgba(255,255,255,0.1)';
+    });
+
+    button.addEventListener('mouseleave', () => {
+      button.style.background = 'rgba(0,0,0,0.85)';
+    });
+  }
+
+  public resetCamera(): void {
+    const startPosition = this.camera.position.clone();
+    const startTarget = this.controls.target.clone();
+    const endPosition = this.defaultCameraPosition.clone();
+    const endTarget = new THREE.Vector3(0, 0, 0);
+
+    let progress = 0;
+    const duration = 60;
+
+    const reset = () => {
+      if (progress >= duration) {
+        this.exitFocusMode();
+        return;
+      }
+      progress++;
+      const t = progress / duration;
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+      this.camera.position.lerpVectors(startPosition, endPosition, eased);
+      this.controls.target.lerpVectors(startTarget, endTarget, eased);
+      this.controls.update();
+
+      requestAnimationFrame(reset);
+    };
+
+    reset();
   }
 }

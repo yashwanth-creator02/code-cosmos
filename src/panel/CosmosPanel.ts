@@ -150,6 +150,20 @@ export class CosmosPanel {
               display: none;
             "></div>
           </div>
+          <button id="reset-camera" style="
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-family: sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+            z-index: 100;
+          ">⟳ Reset View</button>
           <script src="${scriptUri}"></script>
         </body>
       </html>
