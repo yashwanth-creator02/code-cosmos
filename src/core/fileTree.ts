@@ -5,6 +5,7 @@ import * as path from 'path';
 import { CosmosData, CosmosFile, CosmosFolder, FileType } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
 import { logger } from '../utils/logger';
+import { parseDependencies } from './dependencyParser';
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
@@ -78,6 +79,7 @@ async function traverseDirectory(
     }
 
     if (fileType === vscode.FileType.Directory) {
+      // Cleaned up: Just handle the recursion here. Don't parse dependencies mid-flight.
       await traverseDirectory(entryUri, workspaceRoot, exclusions, data, folderId);
     } else if (fileType === vscode.FileType.File) {
       const extension = name.includes('.') ? name.split('.').pop() || '' : '';
@@ -130,10 +132,16 @@ export async function buildFileTree(): Promise<CosmosData> {
     childFolderIds: [],
   };
 
+  // 1. First, build the complete file map structure
   await traverseDirectory(workspaceFolders[0].uri, workspaceRoot, exclusions, data, null);
 
+  // 2. NOW, parse dependencies exactly once since all files exist in memory! ✅
+  logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
+  const dependencies = await parseDependencies(data);
+  data.dependencies = dependencies;
+
   logger.log(
-    `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders`
+    `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders, ${data.dependencies.length} connections mapped.`
   );
 
   return data;
