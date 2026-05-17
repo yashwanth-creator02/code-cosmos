@@ -7,6 +7,7 @@ export class Star {
   public mesh: THREE.Mesh;
   public position: THREE.Vector3;
   public folder: CosmosFolder;
+  public light: THREE.PointLight;
 
   constructor(folder: CosmosFolder, position: THREE.Vector3) {
     this.folder = folder;
@@ -25,7 +26,9 @@ export class Star {
       emissive: color,
       emissiveIntensity: 0.3,
     });
-
+    const starLight = new THREE.PointLight(0xfff5c0, 0.8, 150);
+    starLight.position.copy(position);
+    this.light = starLight;
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.position.copy(position);
 

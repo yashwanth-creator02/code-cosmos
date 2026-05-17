@@ -57,12 +57,7 @@ async function readJsConfigAliases(workspaceRoot: string): Promise<AliasMap> {
   }
 }
 
-// Merge all alias sources
-export async function loadAliases(workspaceRoot: string): Promise<AliasMap> {
-  const tsAliases = await readTsConfigAliases(workspaceRoot);
-  const jsAliases = await readJsConfigAliases(workspaceRoot);
-  return { ...jsAliases, ...tsAliases };
-}
+
 
 function resolveImport(
   importPath: string,
@@ -298,4 +293,57 @@ export async function parseDependencies(data: CosmosData): Promise<CosmosDepende
 
   logger.log(`Total dependencies found: ${allDeps.length}`);
   return allDeps;
+}
+
+// Merge all alias sources
+export async function loadAliases(workspaceRoot: string): Promise<AliasMap> {
+  const tsAliases = await readTsConfigAliases(workspaceRoot);
+  const jsAliases = await readJsConfigAliases(workspaceRoot);
+  return { ...jsAliases, ...tsAliases };
+}
+
+//checks for the indirect dependencies
+export function computeIndirectDependencies(
+  directDeps: CosmosDependency[]
+): CosmosDependency[] {
+  const indirectDeps: CosmosDependency[] = [];
+
+  // Build a quick lookup: for each file, what does it directly import?
+  const directMap = new Map<string, Set<string>>();
+  for (const dep of directDeps) {
+    if (!directMap.has(dep.sourceId)) {
+      directMap.set(dep.sourceId, new Set());
+    }
+    directMap.get(dep.sourceId)!.add(dep.targetId);
+  }
+
+  for (const [sourceId, directTargets] of directMap.entries()) {
+    for (const middleId of directTargets) {
+      const middleTargets = directMap.get(middleId);
+      if (!middleTargets) { continue; }
+
+      for (const targetId of middleTargets) {
+        // Skip if already a direct dependency
+        if (directTargets.has(targetId)) { continue; }
+        // Skip self reference
+        if (targetId === sourceId) { continue; }
+
+        indirectDeps.push({
+          sourceId,
+          targetId,
+          layer: DependencyLayer.INDIRECT,
+          type: DependencyType.IMPORT,
+        });
+      }
+    }
+  }
+
+  // Deduplicate — same pair might appear multiple times
+  const seen = new Set<string>();
+  return indirectDeps.filter(dep => {
+    const key = `${dep.sourceId}→${dep.targetId}`;
+    if (seen.has(key)) { return false; }
+    seen.add(key);
+    return true;
+  });
 }

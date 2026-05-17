@@ -5,7 +5,7 @@ import * as path from 'path';
 import { CosmosData, CosmosFile, CosmosFolder, FileType } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
 import { logger } from '../utils/logger';
-import { parseDependencies } from './dependencyParser';
+import { parseDependencies, computeIndirectDependencies } from './dependencyParser';
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
@@ -137,9 +137,11 @@ export async function buildFileTree(): Promise<CosmosData> {
 
   // 2. NOW, parse dependencies exactly once since all files exist in memory! ✅
   logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
-  const dependencies = await parseDependencies(data);
-  data.dependencies = dependencies;
+  const directDeps = await parseDependencies(data);
+  const indirectDeps = computeIndirectDependencies(directDeps);
+  data.dependencies = [...directDeps, ...indirectDeps];
 
+  logger.log(`Direct: ${directDeps.length}, Indirect: ${indirectDeps.length}, Total: ${data.dependencies.length}`);
   logger.log(
     `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders, ${data.dependencies.length} connections mapped.`
   );

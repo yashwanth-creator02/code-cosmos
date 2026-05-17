@@ -49,9 +49,6 @@ export class Universe {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
     this.scene.add(ambientLight);
 
-    const axesHelper = new THREE.AxesHelper(200);
-    this.scene.add(axesHelper);
-
     const pointLight = new THREE.PointLight(0xffffff, 1, 5000);
     pointLight.position.set(0, 0, 0);
     this.scene.add(pointLight);
@@ -89,6 +86,7 @@ export class Universe {
       const position = this.goldenAnglePosition(index, folderIds.length, 500);
       const star = new Star(folder, position);
       this.stars.set(folderId, star);
+      this.scene.add(star.light);
       this.scene.add(star.mesh);
 
       // Place planets around this star
@@ -109,6 +107,7 @@ export class Universe {
     this.drawDependencies(data.dependencies);
     this.initSearch();
     this.initResetButton();
+    this.addBackgroundStars();
   }
 
   // Distributes points evenly across a sphere surface
@@ -458,5 +457,27 @@ export class Universe {
     };
 
     reset();
+  }
+
+  private addBackgroundStars(): void {
+    const geometry = new THREE.BufferGeometry();
+    const count = 2000;
+    const positions = new Float32Array(count * 3);
+
+    for (let i = 0; i < count * 3; i++) {
+      positions[i] = (Math.random() - 0.5) * 8000;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 1.5,
+      transparent: true,
+      opacity: 0.6,
+    });
+
+    const stars = new THREE.Points(geometry, material);
+    this.scene.add(stars);
   }
 }

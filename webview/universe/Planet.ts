@@ -42,7 +42,7 @@ export class Planet {
     const material = new THREE.MeshStandardMaterial({
       color: FILE_TYPE_COLORS[file.type],
       emissive: FILE_TYPE_COLORS[file.type],
-      emissiveIntensity: 0.1,
+      emissiveIntensity: 0.3,
     });
 
     this.mesh = new THREE.Mesh(geometry, material);

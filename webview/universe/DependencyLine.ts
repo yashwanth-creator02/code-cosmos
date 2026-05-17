@@ -24,7 +24,7 @@ export class DependencyLine {
       transparent: true,
       opacity: dependency.layer === DependencyLayer.DIRECT
         ? 0.4
-        : 0.15,
+        : 0.10,
     });
 
     this.line = new THREE.Line(geometry, material);
