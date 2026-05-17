@@ -43,6 +43,7 @@ export interface CosmosFolder {
   parentId: string | null;
   fileIds: string[];
   childFolderIds: string[];
+  offset?: { x: number; y: number; z: number };
 }
 
 export interface CosmosDependency {

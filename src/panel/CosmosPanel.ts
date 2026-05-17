@@ -9,7 +9,8 @@ export class CosmosPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private lastData: unknown = null;
-
+  private isReady: boolean = false;
+  private pendingMessage: unknown = null;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
@@ -27,21 +28,52 @@ export class CosmosPanel {
     });
 
     this.panel.webview.onDidReceiveMessage(async (message: any) => {
-      logger.log('Message received from webview', message);
+      logger.log('Message received from webview', message.type);
+
+      if (message.type === 'READY') {
+        this.isReady = true;
+        logger.log('Webview is ready');
+
+        // Send any pending message that was queued before webview was ready
+        if (this.pendingMessage) {
+          this.panel.webview.postMessage(this.pendingMessage);
+          this.lastData = this.pendingMessage;
+          this.pendingMessage = null;
+          logger.log('Sent pending LOAD_UNIVERSE to webview');
+        }
+      }
 
       if (message.type === 'OPEN_FILE') {
         const fileId = message.payload.fileId;
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+
+        // Handle namespaced file IDs from multiple workspaces
+        // Format: "workspaceName:relativePath"
+        let workspaceRoot: string | undefined;
+        let actualFileId = fileId;
+
+        if (fileId.includes(':')) {
+          const colonIndex = fileId.indexOf(':');
+          const workspaceName = fileId.substring(0, colonIndex);
+          actualFileId = fileId.substring(colonIndex + 1);
+
+          const folder = vscode.workspace.workspaceFolders?.find(
+            f => f.name === workspaceName
+          );
+          workspaceRoot = folder?.uri.fsPath;
+        } else {
+          workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        }
+
         if (!workspaceRoot) { return; }
 
         const fullPath = vscode.Uri.file(
-          require('path').join(workspaceRoot, fileId)
+          require('path').join(workspaceRoot, actualFileId)
         );
         await vscode.window.showTextDocument(fullPath, {
           viewColumn: vscode.ViewColumn.Beside,
-          preserveFocus: true
+          preserveFocus: true,
         });
-        logger.log(`Opened file: ${fileId}`);
+        logger.log(`Opened file: ${actualFileId}`);
       }
     });
   }
@@ -70,11 +102,21 @@ export class CosmosPanel {
   }
 
   public sendMessage(message: any): void {
-    this.panel.webview.postMessage(message);
     if (message.type === 'LOAD_UNIVERSE') {
-      this.lastData = message;
+      if (this.isReady) {
+        // Webview is ready — send immediately
+        this.panel.webview.postMessage(message);
+        this.lastData = message;
+        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (immediate)');
+      } else {
+        // Webview not ready yet — queue it
+        this.pendingMessage = message;
+        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (queued — waiting for READY)');
+      }
+    } else {
+      this.panel.webview.postMessage(message);
+      logger.log('CosmosPanel.sendMessage', message.type);
     }
-    logger.log('CosmosPanel.sendMessage', message.type);
   }
 
   private getHtmlContent(): string {
@@ -92,8 +134,8 @@ export class CosmosPanel {
               default-src 'none';
               style-src ${this.panel.webview.cspSource} 'unsafe-inline';
               script-src ${this.panel.webview.cspSource};
-              "
-            >
+              connect-src ${this.panel.webview.cspSource};
+            ">
           <style>
             html, body {
               width: 100%;
@@ -107,22 +149,8 @@ export class CosmosPanel {
         </head>
         <body>
           <canvas id="cosmos-canvas" style="width:100%;height:100%;display:block;"></canvas>
-          <button id="help-button" style="
-            position: fixed;
-            top: 20px;
-            right: 70px;
-            background: rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: white;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            font-family: sans-serif;
-            font-size: 14px;
-            cursor: pointer;
-            z-index: 100;
-          ">?</button>
 
+          <!-- Loading overlay -->
           <div id="loading-overlay" style="
             position: fixed;
             top: 0; left: 0;
@@ -145,13 +173,8 @@ export class CosmosPanel {
               animation: pulse 1.5s ease-in-out infinite;
               margin-bottom: 24px;
             "></div>
-            <div style="font-size:18px;font-weight:bold;margin-bottom:8px;">
-              Code Cosmos
-            </div>
-            <div id="loading-text" style="
-              font-size:13px;
-              opacity:0.6;
-            ">Scanning repository...</div>
+            <div style="font-size:18px;font-weight:bold;margin-bottom:8px;">Code Cosmos</div>
+            <div id="loading-text" style="font-size:13px;opacity:0.6;">Scanning repository...</div>
           </div>
 
           <style>
@@ -160,6 +183,8 @@ export class CosmosPanel {
               50% { transform: scale(1.15); box-shadow: 0 0 60px #ffaa00, 0 0 120px #ff6600; }
             }
           </style>
+
+          <!-- Tooltip -->
           <div id="tooltip" style="
             position: fixed;
             display: none;
@@ -174,6 +199,8 @@ export class CosmosPanel {
             z-index: 100;
             line-height: 1.6;
           "></div>
+
+          <!-- Search -->
           <div id="search-container" style="
             position: fixed;
             top: 16px;
@@ -203,6 +230,8 @@ export class CosmosPanel {
               display: none;
             "></div>
           </div>
+
+          <!-- Reset button -->
           <button id="reset-camera" style="
             position: fixed;
             bottom: 20px;
@@ -216,7 +245,26 @@ export class CosmosPanel {
             font-size: 12px;
             cursor: pointer;
             z-index: 100;
-          ">⟳ Reset View</button>\
+          ">⟳ Reset View</button>
+
+          <!-- Help button -->
+          <button id="help-button" style="
+            position: fixed;
+            top: 20px;
+            right: 110px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-family: sans-serif;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">?</button>
+
+          <!-- Mode indicator -->
           <div id="mode-indicator" style="
             position: fixed;
             bottom: 60px;
@@ -293,6 +341,7 @@ export class CosmosPanel {
             </div>
             <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
           </div>
+
           <script src="${scriptUri}"></script>
         </body>
       </html>

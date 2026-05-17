@@ -35,6 +35,9 @@ export class Universe {
     radius: number;
   }> = new Map();
   private starLabels: THREE.Sprite[] = [];
+  private planetLabels: Map<string, THREE.Sprite> = new Map();
+  private readonly LABEL_SHOW_DISTANCE = 150;
+
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -118,18 +121,53 @@ export class Universe {
     this.planets.clear();
     this.orbitalData.clear();
 
+    this.planetLabels.forEach(label => this.scene.remove(label));
+    this.planetLabels.clear();
+
     // Remove old central core
     if (this.centralCore) {
       this.scene.remove(this.centralCore);
       this.centralCore = null;
     }
-
-    this.addCentralBody(data.folders[data.rootFolderId]);
+    const rootFolder = data.folders[data.rootFolderId];
+    this.addCentralBody(rootFolder);
 
     const folderIds = Object.keys(data.folders);
 
     folderIds.forEach((folderId, index) => {
       const folder = data.folders[folderId];
+
+      if (folder.fileIds.length === 0 && folder.childFolderIds.length === 0) {
+        return;
+      }
+
+      // Root folder files orbit the central body instead of a star
+      if (folderId === data.rootFolderId) {
+        folder.fileIds.forEach((fileId, planetIndex) => {
+          const file = data.files[fileId];
+          if (!file) { return; }
+
+          const { position, angle, inclination } = this.orbitalPosition(
+            new THREE.Vector3(0, 0, 0), // orbit around center
+            planetIndex,
+            folder.fileIds.length,
+            80  // slightly closer than regular stars
+          );
+
+          const planet = new Planet(file, position);
+          this.planets.set(fileId, planet);
+          this.scene.add(planet.mesh);
+
+          this.orbitalData.set(fileId, {
+            starPosition: new THREE.Vector3(0, 0, 0),
+            angle,
+            inclination,
+            speed: 0.0003 + Math.random() * 0.0001,
+            radius: 80,
+          });
+        });
+        return;
+      }
       const starPosition = this.goldenAnglePosition(index, folderIds.length, 500);
 
       const star = new Star(folder, starPosition);
@@ -173,13 +211,18 @@ export class Universe {
     this.drawDependencies(data.dependencies);
   }
 
-  private goldenAnglePosition(index: number, total: number, radius: number): THREE.Vector3 {
+  private goldenAnglePosition(
+    index: number,
+    total: number,
+    radius: number,
+    offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }
+  ): THREE.Vector3 {
     const phi = Math.acos(1 - (2 * (index + 0.5)) / total);
     const theta = Math.PI * (1 + Math.sqrt(5)) * index;
     return new THREE.Vector3(
-      radius * Math.sin(phi) * Math.cos(theta),
-      radius * Math.sin(phi) * Math.sin(theta),
-      radius * Math.cos(phi)
+      offset.x + radius * Math.sin(phi) * Math.cos(theta),
+      offset.y + radius * Math.sin(phi) * Math.sin(theta),
+      offset.z + radius * Math.cos(phi)
     );
   }
 
@@ -209,15 +252,33 @@ export class Universe {
   }
 
   private drawDependencies(dependencies: CosmosDependency[]): void {
+    const MAX_LINES = 2000;
+    let lineCount = 0;
+
     dependencies.forEach(dep => {
+      if (lineCount >= MAX_LINES) { return; }
+
       const sourcePlanet = this.planets.get(dep.sourceId);
       const targetPlanet = this.planets.get(dep.targetId);
       if (!sourcePlanet || !targetPlanet) { return; }
 
+      // Prioritize direct and circular over indirect and layer3
+      // Skip layer3 entirely on large repos
+      if (this.planets.size > 300 &&
+        (dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
+          dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY)) {
+        return;
+      }
+
       const line = new DependencyLine(dep, sourcePlanet.mesh.position, targetPlanet.mesh.position);
       this.lines.push(line);
       this.scene.add(line.line);
+      lineCount++;
     });
+
+    if (lineCount >= MAX_LINES) {
+      console.warn(`Dependency lines capped at ${MAX_LINES} for performance`);
+    }
   }
 
   private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
@@ -253,6 +314,7 @@ export class Universe {
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
+    this.raycaster.params.Line = { threshold: 3 };
     const tooltip = document.getElementById('tooltip')!;
 
     const allMeshes = [
@@ -589,7 +651,11 @@ export class Universe {
     this.scene.add(new THREE.Points(geometry, material));
   }
 
-  private addCentralBody(rootFolder: CosmosFolder): void {
+  private addCentralBody(rootFolder: CosmosFolder | undefined): void {
+    if (!rootFolder) {
+      console.error('[Code Cosmos] Root folder not found — cannot add central body');
+      return;
+    }
     const coreGeometry = new THREE.SphereGeometry(40, 32, 32);
     const coreMaterial = new THREE.MeshStandardMaterial({
       color: 0xfff5c0,
@@ -791,6 +857,7 @@ export class Universe {
     });
 
     this.updateDependencyLines();
+    this.updateProximityLabels(); // add this
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -830,5 +897,67 @@ export class Universe {
     button.addEventListener('mouseleave', () => {
       button.style.background = 'rgba(0,0,0,0.85)';
     });
+  }
+
+  private updateProximityLabels(): void {
+    this.planets.forEach((planet, fileId) => {
+      const distance = this.camera.position.distanceTo(planet.mesh.position);
+
+      // Get or create label for this planet
+      let label = this.planetLabels.get(fileId);
+
+      if (distance < this.LABEL_SHOW_DISTANCE) {
+        const file = this.data?.files[fileId];
+        if (!file) { return; }
+
+        if (!label) {
+          label = this.createPlanetLabel(file.name);
+          this.planetLabels.set(fileId, label);
+          this.scene.add(label);
+        }
+
+        // Position above planet
+        label.position.copy(planet.mesh.position);
+        label.position.y += 8;
+
+        // Fade in based on distance
+        const opacity = 1 - (distance / this.LABEL_SHOW_DISTANCE);
+        (label.material as THREE.SpriteMaterial).opacity = opacity;
+        label.visible = true;
+
+      } else if (label) {
+        label.visible = false;
+      }
+    });
+  }
+
+  private createPlanetLabel(name: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 48;
+    const ctx = canvas.getContext('2d')!;
+
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(50, 12, 1);
+    return sprite;
   }
 }

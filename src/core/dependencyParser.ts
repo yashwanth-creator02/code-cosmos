@@ -124,10 +124,16 @@ function parseTsJsDependencies(
   normalizedFileIds: Record<string, string>
 ): CosmosDependency[] {
   const deps: CosmosDependency[] = [];
+
+  // Remove single line comments before parsing
+  const withoutComments = content
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
   const importRegex = /(?:import\s+.*?\s+from\s+|require\s*\(\s*)['"]([^'"]+)['"]/g;
   let match;
 
-  while ((match = importRegex.exec(content)) !== null) {
+  while ((match = importRegex.exec(withoutComments)) !== null) {
     const importPath = match[1];
     const resolvedId = resolveImport(importPath, fileId, data, aliases, normalizedFileIds);
     if (resolvedId) {
@@ -152,13 +158,24 @@ function parseHtmlDependencies(
   normalizedFileIds: Record<string, string>
 ): CosmosDependency[] {
   const deps: CosmosDependency[] = [];
+
+  // Match src and href attributes
   const refRegex = /(?:src|href)=["']([^"']+)["']/g;
   let match;
 
   while ((match = refRegex.exec(content)) !== null) {
     const refPath = match[1];
-    if (refPath.startsWith('http') || refPath.startsWith('//')) { continue; }
-    const resolvedId = resolveImport(refPath, fileId, data, aliases, normalizedFileIds);
+
+    // Skip external URLs and data URIs
+    if (
+      refPath.startsWith('http') ||
+      refPath.startsWith('//') ||
+      refPath.startsWith('data:') ||
+      refPath.startsWith('#') ||
+      refPath.startsWith('mailto:')
+    ) { continue; }
+
+    const resolvedId = resolveHtmlPath(refPath, fileId, normalizedFileIds);
     if (resolvedId) {
       deps.push({
         sourceId: fileId,
@@ -170,6 +187,54 @@ function parseHtmlDependencies(
   }
 
   return deps;
+}
+function resolveHtmlPath(
+  refPath: string,
+  sourceFile: string,
+  normalizedFileIds: Record<string, string>
+): string | null {
+
+  const extensions = ['.js', '.ts', '.css', '.html', '.png', '.jpg', '.svg'];
+
+  // Helper to try a path with extensions
+  function tryPath(base: string): string | null {
+    const normalized = base.replace(/\\/g, '/');
+    if (normalizedFileIds[normalized]) { return normalizedFileIds[normalized]; }
+    for (const ext of extensions) {
+      if (normalizedFileIds[normalized + ext]) {
+        return normalizedFileIds[normalized + ext];
+      }
+    }
+    return null;
+  }
+
+  // Strategy 1 — relative to the HTML file
+  const relativeBase = path.join(
+    path.dirname(sourceFile),
+    refPath
+  ).replace(/\\/g, '/');
+  const rel = tryPath(relativeBase);
+  if (rel) { return rel; }
+
+  // Strategy 2 — absolute from workspace root (strip leading /)
+  if (refPath.startsWith('/')) {
+    const fromRoot = refPath.slice(1);
+    const abs = tryPath(fromRoot);
+    if (abs) { return abs; }
+  }
+
+  // Strategy 3 — try common web roots
+  const webRoots = ['public', 'static', 'assets', 'www', 'dist', 'src'];
+  for (const root of webRoots) {
+    const withRoot = path.join(
+      root,
+      refPath.startsWith('/') ? refPath.slice(1) : refPath
+    ).replace(/\\/g, '/');
+    const fromWebRoot = tryPath(withRoot);
+    if (fromWebRoot) { return fromWebRoot; }
+  }
+
+  return null;
 }
 
 // Parse CSS @import
@@ -411,10 +476,6 @@ export function computeLayer3Dependencies(
   const layer3: CosmosDependency[] = [];
   const MAX_LAYER3 = 500;
 
-  if (layer3.length > MAX_LAYER3) {
-    logger.warn(`Layer 3 capped at ${MAX_LAYER3} (found ${layer3.length})`);
-    return layer3.slice(0, MAX_LAYER3);
-  }
   // Build reverse map — who imports each file?
   const importedBy = new Map<string, Set<string>>();
   for (const dep of directDeps) {
@@ -478,5 +539,11 @@ export function computeLayer3Dependencies(
   }
 
   logger.log(`Layer 3 connections: ${layer3.length}`);
+
+  if (layer3.length > MAX_LAYER3) {
+    logger.warn(`Layer 3 capped at ${MAX_LAYER3} (found ${layer3.length})`);
+    return layer3.slice(0, MAX_LAYER3);
+  }
+
   return layer3;
 }

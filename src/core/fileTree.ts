@@ -45,8 +45,18 @@ async function traverseDirectory(
   workspaceRoot: string,
   exclusions: string[],
   data: CosmosData,
-  parentFolderId: string | null
+  parentFolderId: string | null,
+  visitedPaths: Set<string> = new Set() // add this
 ): Promise<void> {
+
+  // Prevent infinite loops from symlinks
+  const realPath = dirUri.fsPath;
+  if (visitedPaths.has(realPath)) {
+    logger.warn(`Skipping already visited path (possible symlink loop): ${realPath}`);
+    return;
+  }
+  visitedPaths.add(realPath);
+
   const entries = await vscode.workspace.fs.readDirectory(dirUri);
 
   const relativePath = path.relative(workspaceRoot, dirUri.fsPath) || '.';
@@ -79,8 +89,14 @@ async function traverseDirectory(
     }
 
     if (fileType === vscode.FileType.Directory) {
-      // Cleaned up: Just handle the recursion here. Don't parse dependencies mid-flight.
-      await traverseDirectory(entryUri, workspaceRoot, exclusions, data, folderId);
+      await traverseDirectory(
+        entryUri,
+        workspaceRoot,
+        exclusions,
+        data,
+        folderId,
+        visitedPaths
+      );
     } else if (fileType === vscode.FileType.File) {
       const extension = name.includes('.') ? name.split('.').pop() || '' : '';
       const stat = await vscode.workspace.fs.stat(entryUri);
@@ -103,17 +119,14 @@ async function traverseDirectory(
   }
 }
 
-export async function buildFileTree(): Promise<CosmosData> {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    throw new Error('No workspace folder open');
-  }
-
-  const workspaceRoot = workspaceFolders[0].uri.fsPath;
+export async function buildFileTree(
+  workspaceFolder: vscode.WorkspaceFolder,
+  offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }
+): Promise<CosmosData> {
+  const workspaceRoot = workspaceFolder.uri.fsPath;
   logger.log(`Building file tree for: ${workspaceRoot}`);
 
   const exclusions = await buildExclusionList(workspaceRoot);
-  logger.log(`Exclusions loaded: ${exclusions.join(', ')}`);
 
   const data: CosmosData = {
     files: {},
@@ -130,10 +143,17 @@ export async function buildFileTree(): Promise<CosmosData> {
     parentId: null,
     fileIds: [],
     childFolderIds: [],
+    offset,
   };
 
-  // 1. First, build the complete file map structure
-  await traverseDirectory(workspaceFolders[0].uri, workspaceRoot, exclusions, data, null);
+  await traverseDirectory(
+    workspaceFolder.uri,
+    workspaceRoot,
+    exclusions,
+    data,
+    null,
+    new Set()
+  );
 
   // 2. NOW, parse dependencies exactly once since all files exist in memory!
   logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
