@@ -5,7 +5,7 @@ import * as path from 'path';
 import { CosmosData, CosmosFile, CosmosFolder, FileType } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
 import { logger } from '../utils/logger';
-import { parseDependencies, computeIndirectDependencies } from './dependencyParser';
+import { parseDependencies, computeIndirectDependencies, detectCircularDependencies, computeLayer3Dependencies } from './dependencyParser';
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
@@ -135,13 +135,23 @@ export async function buildFileTree(): Promise<CosmosData> {
   // 1. First, build the complete file map structure
   await traverseDirectory(workspaceFolders[0].uri, workspaceRoot, exclusions, data, null);
 
-  // 2. NOW, parse dependencies exactly once since all files exist in memory! ✅
+  // 2. NOW, parse dependencies exactly once since all files exist in memory!
   logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
   const directDeps = await parseDependencies(data);
   const indirectDeps = computeIndirectDependencies(directDeps);
-  data.dependencies = [...directDeps, ...indirectDeps];
+  const circularDeps = detectCircularDependencies(directDeps);
+  const layer3Deps = computeLayer3Dependencies(directDeps);
 
-  logger.log(`Direct: ${directDeps.length}, Indirect: ${indirectDeps.length}, Total: ${data.dependencies.length}`);
+  data.dependencies = [
+    ...directDeps,
+    ...indirectDeps,
+    ...circularDeps,
+    ...layer3Deps,
+  ];
+
+  logger.log(
+    `Direct: ${directDeps.length}, Indirect: ${indirectDeps.length}, Circular: ${circularDeps.length}, Layer3: ${layer3Deps.length}, Total: ${data.dependencies.length}`
+  );
   logger.log(
     `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders, ${data.dependencies.length} connections mapped.`
   );

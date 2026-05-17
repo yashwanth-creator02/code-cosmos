@@ -2,13 +2,12 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { CosmosData } from '../../src/types';
 import { Star } from './Star';
 import { Planet } from './Planet';
 import { DependencyLine } from './DependencyLine';
-import { CosmosDependency } from '../../src/types';
 import { sendToExtension } from '../bridge/messageBridge';
-import { CosmosFolder } from '../../src/types';
+import { CosmosFolder, CosmosDependency, DependencyLayer, CosmosData } from '../../src/types';
+
 
 export class Universe {
   private scene: THREE.Scene;
@@ -28,7 +27,7 @@ export class Universe {
   private spacecraftMode = false;
   private keys: Record<string, boolean> = {};
   private pitch = 0; // up/down rotation
-  private yaw = 0;   // left/right rotation
+  private yaw = 0;   // left/right rotation;
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -97,39 +96,81 @@ export class Universe {
   public build(data: CosmosData): void {
     this.data = data;
     this.dependencies = data.dependencies;
-    this.stars.forEach((star) => this.scene.remove(star.mesh));
-    this.planets.forEach((planet) => this.scene.remove(planet.mesh));
+
+    // Clear old stars
+    this.stars.forEach((star) => {
+      this.scene.remove(star.mesh);
+      this.scene.remove(star.light);
+    });
+
+    // Clear old planets
+    this.planets.forEach((planet) => {
+      this.scene.remove(planet.mesh);
+    });
 
     this.stars.clear();
     this.planets.clear();
 
+    // Clear old dependency lines
+    this.lines.forEach((line) => {
+      this.scene.remove(line.line);
+    });
+    this.lines = [];
+
+    // Remove old central core if exists
+    if (this.centralCore) {
+      this.scene.remove(this.centralCore);
+      this.centralCore = null;
+    }
+
     this.addCentralBody(data.folders[data.rootFolderId]);
+
     // Place stars using golden angle distribution
     const folderIds = Object.keys(data.folders);
+
     folderIds.forEach((folderId, index) => {
       const folder = data.folders[folderId];
-      const position = this.goldenAnglePosition(index, folderIds.length, 500);
+
+      const position = this.goldenAnglePosition(
+        index,
+        folderIds.length,
+        500
+      );
+
       const star = new Star(folder, position);
-      star.mesh.userData = { type: 'star', id: folderId, name: folder.name };
+
+      star.mesh.userData = {
+        type: 'star',
+        id: folderId,
+        name: folder.name,
+      };
+
       this.stars.set(folderId, star);
+
       this.scene.add(star.light);
       this.scene.add(star.mesh);
 
       // Place planets around this star
       folder.fileIds.forEach((fileId, planetIndex) => {
         const file = data.files[fileId];
+
         if (!file) { return; }
+
         const planetPosition = this.orbitalPosition(
           position,
           planetIndex,
           folder.fileIds.length * 4,
           100
         );
+
         const planet = new Planet(file, planetPosition);
+
         this.planets.set(fileId, planet);
+
         this.scene.add(planet.mesh);
       });
     });
+
     this.drawDependencies(data.dependencies);
   }
 
@@ -239,11 +280,11 @@ export class Universe {
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-      <strong>⭐ ${hovered.userData.name}</strong><br>
-      Root Repository<br>
-      ${Object.keys(this.data!.files).length} total files<br>
-      ${Object.keys(this.data!.folders).length} total folders
-    `;
+        <strong>⭐ ${hovered.userData.name}</strong><br>
+        Root Repository<br>
+        ${Object.keys(this.data!.files).length} total files<br>
+        ${Object.keys(this.data!.folders).length} total folders
+      `;
         return;
       }
 
@@ -255,14 +296,29 @@ export class Universe {
         const fileCount = folder.fileIds.length;
         const subFolderCount = folder.childFolderIds.length;
 
+        // Count dependencies for files in this folder
+        const folderFileIds = new Set(folder.fileIds);
+        const outgoing = this.dependencies.filter(
+          d => folderFileIds.has(d.sourceId) && d.layer === DependencyLayer.DIRECT
+        ).length;
+        const incoming = this.dependencies.filter(
+          d => folderFileIds.has(d.targetId) && d.layer === DependencyLayer.DIRECT
+        ).length;
+        const hasCircular = this.dependencies.some(
+          d => d.layer === DependencyLayer.CIRCULAR &&
+            (folderFileIds.has(d.sourceId) || folderFileIds.has(d.targetId))
+        );
+
         tooltip.style.display = 'block';
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-          <strong>📁 ${folder.name}</strong><br>
-          Files: ${fileCount}<br>
-          Subfolders: ${subFolderCount}
-        `;
+        <strong>📁 ${folder.name}</strong><br>
+        Files: ${fileCount}<br>
+        Subfolders: ${subFolderCount}<br>
+        <span style="color:#ffffff">⬤</span> Outgoing: ${outgoing} / Incoming: ${incoming}<br>
+        ${hasCircular ? '<span style="color:#FF1744">⬤ Contains circular dependency</span>' : ''}
+      `;
         return;
       }
 
@@ -270,8 +326,33 @@ export class Universe {
       const file = this.data?.files[hoveredFileId];
       if (!file) { return; }
 
-      const dependsOn = this.dependencies.filter(d => d.sourceId === hoveredFileId).length;
-      const dependedBy = this.dependencies.filter(d => d.targetId === hoveredFileId).length;
+      const dependsOn = this.dependencies.filter(
+        d => d.sourceId === hoveredFileId && d.layer === DependencyLayer.DIRECT
+      ).length;
+
+      const dependedBy = this.dependencies.filter(
+        d => d.targetId === hoveredFileId && d.layer === DependencyLayer.DIRECT
+      ).length;
+
+      const indirectCount = this.dependencies.filter(
+        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
+          && d.layer === DependencyLayer.INDIRECT
+      ).length;
+
+      const isCircular = this.dependencies.some(
+        d => d.layer === DependencyLayer.CIRCULAR &&
+          (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
+      );
+
+      const sharedDependentCount = this.dependencies.filter(
+        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
+          && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT
+      ).length;
+
+      const sharedDependencyCount = this.dependencies.filter(
+        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
+          && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY
+      ).length;
 
       tooltip.style.display = 'block';
       tooltip.style.left = `${event.clientX + 15}px`;
@@ -279,8 +360,11 @@ export class Universe {
       tooltip.innerHTML = `
       <strong>${file.name}</strong><br>
       Type: ${file.extension.toUpperCase()}<br>
-      Depends on: ${dependsOn} files<br>
-      Used by: ${dependedBy} files
+      <span style="color:#ffffff">⬤</span> Direct: ${dependsOn} out / ${dependedBy} in<br>
+      <span style="color:#4488ff">⬤</span> Indirect: ${indirectCount}<br>
+      <span style="color:#FFB300">⬤</span> Shared dependent: ${sharedDependentCount}<br>
+      <span style="color:#00BCD4">⬤</span> Shared dependency: ${sharedDependencyCount}<br>
+      ${isCircular ? '<span style="color:#FF1744">⬤ Circular dependency detected</span><br>' : ''}
     `;
     } else {
       tooltip.style.display = 'none';
@@ -589,6 +673,7 @@ export class Universe {
       // Toggle spacecraft mode with F key
       if (e.key === 'f' && !e.ctrlKey) {
         this.spacecraftMode = !this.spacecraftMode;
+        this.controls.enabled = !this.spacecraftMode;
         this.showModeIndicator(this.spacecraftMode);
       }
     });
@@ -662,6 +747,18 @@ export class Universe {
     this.controls.target.copy(target);
   }
 
+  private showModeIndicator(spacecraft: boolean): void {
+    const indicator = document.getElementById('mode-indicator');
+    if (!indicator) { return; }
+
+    indicator.textContent = spacecraft
+      ? '🚀 Spacecraft Mode — WASD to fly, Click to capture mouse, Esc to release'
+      : '🔭 Orbit Mode — F to switch';
+
+    indicator.style.opacity = '1';
+    setTimeout(() => { indicator.style.opacity = '0'; }, 2000);
+  }
+
 
   private animate(): void {
     requestAnimationFrame(() => this.animate());
@@ -678,20 +775,5 @@ export class Universe {
     }
 
     this.renderer.render(this.scene, this.camera);
-  }
-  private showModeIndicator(spacecraft: boolean): void {
-    const indicator = document.getElementById('mode-indicator');
-
-    if (!indicator) { return; }
-
-    indicator.textContent = spacecraft
-      ? '🚀 Spacecraft Mode — WASD to fly, Click to capture mouse, Esc to release'
-      : '🔭 Orbit Mode — F to switch';
-
-    indicator.style.opacity = '1';
-
-    setTimeout(() => {
-      indicator.style.opacity = '0';
-    }, 2000);
   }
 }

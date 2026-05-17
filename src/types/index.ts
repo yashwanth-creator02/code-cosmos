@@ -14,8 +14,10 @@ export enum FileType {
 export enum DependencyLayer {
   DIRECT = 'direct',
   INDIRECT = 'indirect',
+  CIRCULAR = 'circular',
+  LAYER3_SHARED_DEPENDENT = 'layer3_shared_dependent',
+  LAYER3_SHARED_DEPENDENCY = 'layer3_shared_dependency',
 }
-
 export enum DependencyType {
   IMPORT = 'import',
   REFERENCE = 'reference',

@@ -347,3 +347,136 @@ export function computeIndirectDependencies(
     return true;
   });
 }
+
+//circular dependencies detector
+export function detectCircularDependencies(
+  directDeps: CosmosDependency[]
+): CosmosDependency[] {
+  // Build adjacency map — who does each file import?
+  const graph = new Map<string, Set<string>>();
+  for (const dep of directDeps) {
+    if (!graph.has(dep.sourceId)) {
+      graph.set(dep.sourceId, new Set());
+    }
+    graph.get(dep.sourceId)!.add(dep.targetId);
+  }
+
+  const circularDeps: CosmosDependency[] = [];
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  function dfs(fileId: string, path: string[]): void {
+    visited.add(fileId);
+    recursionStack.add(fileId);
+
+    const neighbors = graph.get(fileId) || new Set();
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor)) {
+        dfs(neighbor, [...path, neighbor]);
+      } else if (recursionStack.has(neighbor)) {
+        // Found a cycle — neighbor is an ancestor in current path
+        // The circular edge is fileId → neighbor
+        circularDeps.push({
+          sourceId: fileId,
+          targetId: neighbor,
+          layer: DependencyLayer.CIRCULAR,
+          type: DependencyType.IMPORT,
+        });
+
+        // Log the full cycle path for debugging
+        const cycleStart = path.indexOf(neighbor);
+        const cyclePath = [...path.slice(cycleStart), fileId, neighbor];
+        logger.warn(`Circular dependency: ${cyclePath.join(' → ')}`);
+      }
+    }
+
+    recursionStack.delete(fileId);
+  }
+
+  // Run DFS from every node
+  for (const fileId of graph.keys()) {
+    if (!visited.has(fileId)) {
+      dfs(fileId, [fileId]);
+    }
+  }
+
+  logger.log(`Circular dependencies found: ${circularDeps.length}`);
+  return circularDeps;
+}
+
+//shared dependencies
+export function computeLayer3Dependencies(
+  directDeps: CosmosDependency[]
+): CosmosDependency[] {
+  const layer3: CosmosDependency[] = [];
+  const MAX_LAYER3 = 500;
+
+  if (layer3.length > MAX_LAYER3) {
+    logger.warn(`Layer 3 capped at ${MAX_LAYER3} (found ${layer3.length})`);
+    return layer3.slice(0, MAX_LAYER3);
+  }
+  // Build reverse map — who imports each file?
+  const importedBy = new Map<string, Set<string>>();
+  for (const dep of directDeps) {
+    if (!importedBy.has(dep.targetId)) {
+      importedBy.set(dep.targetId, new Set());
+    }
+    importedBy.get(dep.targetId)!.add(dep.sourceId);
+  }
+
+  // Build forward map — what does each file import?
+  const imports = new Map<string, Set<string>>();
+  for (const dep of directDeps) {
+    if (!imports.has(dep.sourceId)) {
+      imports.set(dep.sourceId, new Set());
+    }
+    imports.get(dep.sourceId)!.add(dep.targetId);
+  }
+
+  const seen = new Set<string>();
+
+  // Shared dependents — A and B are both imported by C
+  for (const [, importers] of importedBy.entries()) {
+    const importerList = Array.from(importers);
+    for (let i = 0; i < importerList.length; i++) {
+      for (let j = i + 1; j < importerList.length; j++) {
+        const a = importerList[i];
+        const b = importerList[j];
+        const key = [a, b].sort().join('↔');
+        if (!seen.has(key)) {
+          seen.add(key);
+          layer3.push({
+            sourceId: a,
+            targetId: b,
+            layer: DependencyLayer.LAYER3_SHARED_DEPENDENT,
+            type: DependencyType.REFERENCE,
+          });
+        }
+      }
+    }
+  }
+
+  // Shared dependencies — A and B both import C
+  for (const [, deps] of imports.entries()) {
+    const depList = Array.from(deps);
+    for (let i = 0; i < depList.length; i++) {
+      for (let j = i + 1; j < depList.length; j++) {
+        const a = depList[i];
+        const b = depList[j];
+        const key = [a, b].sort().join('↔');
+        if (!seen.has(key)) {
+          seen.add(key);
+          layer3.push({
+            sourceId: a,
+            targetId: b,
+            layer: DependencyLayer.LAYER3_SHARED_DEPENDENCY,
+            type: DependencyType.REFERENCE,
+          });
+        }
+      }
+    }
+  }
+
+  logger.log(`Layer 3 connections: ${layer3.length}`);
+  return layer3;
+}
