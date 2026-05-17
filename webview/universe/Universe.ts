@@ -37,7 +37,7 @@ export class Universe {
   private starLabels: THREE.Sprite[] = [];
   private planetLabels: Map<string, THREE.Sprite> = new Map();
   private readonly LABEL_SHOW_DISTANCE = 150;
-
+  private lastMouseMoveTime = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -309,35 +309,37 @@ export class Universe {
   }
 
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
+    const now = Date.now();
     const rect = canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    this.raycaster.params.Line = { threshold: 3 };
+    this.raycaster.params.Line = { threshold: 1 };
     const tooltip = document.getElementById('tooltip')!;
 
+    // Check planets and stars first
     const allMeshes = [
       ...Array.from(this.planets.values()).map(p => p.mesh),
       ...Array.from(this.stars.values()).map(s => s.mesh),
     ];
     if (this.centralCore) { allMeshes.push(this.centralCore); }
 
-    const intersects = this.raycaster.intersectObjects(allMeshes);
+    const meshIntersects = this.raycaster.intersectObjects(allMeshes);
 
-    if (intersects.length > 0) {
-      const hovered = intersects[0].object;
+    if (meshIntersects.length > 0) {
+      const hovered = meshIntersects[0].object;
 
       if (hovered.userData.type === 'central') {
         tooltip.style.display = 'block';
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-          <strong>⭐ ${hovered.userData.name}</strong><br>
-          Root Repository<br>
-          ${Object.keys(this.data!.files).length} total files<br>
-          ${Object.keys(this.data!.folders).length} total folders
-        `;
+      <strong>⭐ ${hovered.userData.name}</strong><br>
+      Root Repository<br>
+      ${Object.keys(this.data!.files).length} total files<br>
+      ${Object.keys(this.data!.folders).length} total folders
+    `;
         return;
       }
 
@@ -346,6 +348,10 @@ export class Universe {
         const folder = this.data!.folders[folderId];
         if (!folder) { return; }
 
+        const fileCount = folder.fileIds.length;
+        const subFolderCount = folder.childFolderIds.length;
+
+        // Count dependencies for files in this folder
         const folderFileIds = new Set(folder.fileIds);
         const outgoing = this.dependencies.filter(
           d => folderFileIds.has(d.sourceId) && d.layer === DependencyLayer.DIRECT
@@ -362,12 +368,12 @@ export class Universe {
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-          <strong>📁 ${folder.name}</strong><br>
-          Files: ${folder.fileIds.length}<br>
-          Subfolders: ${folder.childFolderIds.length}<br>
-          <span style="color:#ffffff">⬤</span> Outgoing: ${outgoing} / Incoming: ${incoming}<br>
-          ${hasCircular ? '<span style="color:#FF1744">⬤ Contains circular dependency</span>' : ''}
-        `;
+      <strong>📁 ${folder.name}</strong><br>
+      Files: ${fileCount}<br>
+      Subfolders: ${subFolderCount}<br>
+      <span style="color:#ffffff">⬤</span> Outgoing: ${outgoing} / Incoming: ${incoming}<br>
+      ${hasCircular ? '<span style="color:#FF1744">⬤ Contains circular dependency</span>' : ''}
+    `;
         return;
       }
 
@@ -378,21 +384,26 @@ export class Universe {
       const dependsOn = this.dependencies.filter(
         d => d.sourceId === hoveredFileId && d.layer === DependencyLayer.DIRECT
       ).length;
+
       const dependedBy = this.dependencies.filter(
         d => d.targetId === hoveredFileId && d.layer === DependencyLayer.DIRECT
       ).length;
+
       const indirectCount = this.dependencies.filter(
         d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
           && d.layer === DependencyLayer.INDIRECT
       ).length;
+
       const isCircular = this.dependencies.some(
         d => d.layer === DependencyLayer.CIRCULAR &&
           (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
       );
+
       const sharedDependentCount = this.dependencies.filter(
         d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
           && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT
       ).length;
+
       const sharedDependencyCount = this.dependencies.filter(
         d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
           && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY
@@ -402,19 +413,60 @@ export class Universe {
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
       tooltip.innerHTML = `
-        <strong>${file.name}</strong><br>
-        Type: ${file.extension.toUpperCase()}<br>
-        <span style="color:#ffffff">⬤</span> Direct: ${dependsOn} out / ${dependedBy} in<br>
-        <span style="color:#4488ff">⬤</span> Indirect: ${indirectCount}<br>
-        <span style="color:#FFB300">⬤</span> Shared dependent: ${sharedDependentCount}<br>
-        <span style="color:#00BCD4">⬤</span> Shared dependency: ${sharedDependencyCount}<br>
-        ${isCircular ? '<span style="color:#FF1744">⬤ Circular dependency detected</span><br>' : ''}
-      `;
+      <strong>${file.name}</strong><br>
+      Type: ${file.extension.toUpperCase()}<br>
+      <span style="color:#ffffff">⬤</span> Direct: ${dependsOn} out / ${dependedBy} in<br>
+      <span style="color:#4488ff">⬤</span> Indirect: ${indirectCount}<br>
+      <span style="color:#FFB300">⬤</span> Shared dependent: ${sharedDependentCount}<br>
+      <span style="color:#00BCD4">⬤</span> Shared dependency: ${sharedDependencyCount}<br>
+      ${isCircular ? '<span style="color:#FF1744">⬤ Circular dependency detected</span><br>' : ''}
+    `;
+      return;
+    }
+
+    // Throttle line raycasting — only every 50ms
+    if (now - this.lastMouseMoveTime < 50) { return; }
+    this.lastMouseMoveTime = now;
+
+    const lineMeshes = this.lines.map(l => l.line);
+    const lineIntersects = this.raycaster.intersectObjects(lineMeshes);
+
+    if (lineIntersects.length > 0) {
+      const hitLine = lineIntersects[0].object;
+      const depLine = this.lines.find(l => l.line === hitLine);
+      if (!depLine) {
+        tooltip.style.display = 'none';
+        return;
+      }
+
+      // Use current planet positions to confirm line is still near mouse
+      const sourcePlanet = this.planets.get(depLine.dependency.sourceId);
+      const targetPlanet = this.planets.get(depLine.dependency.targetId);
+
+      const sourceFile = this.data?.files[depLine.dependency.sourceId];
+      const targetFile = this.data?.files[depLine.dependency.targetId];
+
+      if (!sourceFile || !targetFile) {
+        tooltip.style.display = 'none';
+        return;
+      }
+
+      const layerInfo = this.getLayerInfo(depLine.dependency.layer);
+
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${event.clientX + 15}px`;
+      tooltip.style.top = `${event.clientY + 15}px`;
+      tooltip.innerHTML = `
+      <span style="color:${layerInfo.color}">⬤ ${layerInfo.label}</span><br>
+      <strong>From:</strong> ${sourceFile.name}<br>
+      <span style="opacity:0.5;font-size:10px">${sourceFile.relativePath}</span><br>
+      <strong>To:</strong> ${targetFile.name}<br>
+      <span style="opacity:0.5;font-size:10px">${targetFile.relativePath}</span>
+    `;
     } else {
       tooltip.style.display = 'none';
     }
   }
-
   private enterFocusMode(fileId: string): void {
     this.focusedFileId = fileId;
 
@@ -959,5 +1011,22 @@ export class Universe {
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(50, 12, 1);
     return sprite;
+  }
+
+  private getLayerInfo(layer: DependencyLayer): { label: string; color: string } {
+    switch (layer) {
+      case DependencyLayer.DIRECT:
+        return { label: 'Direct import', color: '#ffffff' };
+      case DependencyLayer.INDIRECT:
+        return { label: 'Indirect chain', color: '#4488ff' };
+      case DependencyLayer.CIRCULAR:
+        return { label: 'Circular dependency', color: '#FF1744' };
+      case DependencyLayer.LAYER3_SHARED_DEPENDENT:
+        return { label: 'Shared dependent', color: '#FFB300' };
+      case DependencyLayer.LAYER3_SHARED_DEPENDENCY:
+        return { label: 'Shared dependency', color: '#00BCD4' };
+      default:
+        return { label: 'Unknown', color: '#ffffff' };
+    }
   }
 }
