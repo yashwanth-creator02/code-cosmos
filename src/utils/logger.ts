@@ -4,9 +4,8 @@ import * as vscode from 'vscode';
 
 let IS_DEV = false;
 
-export function initLogger(extContext: vscode.ExtensionContext) {
-  IS_DEV =
-    extContext.extensionMode === vscode.ExtensionMode.Development;
+export function initLogger(extContext: vscode.ExtensionContext): void {
+  IS_DEV = extContext.extensionMode === vscode.ExtensionMode.Development;
 }
 
 export const logger = {
@@ -18,10 +17,9 @@ export const logger = {
 
   warn: (message: string, ...args: any[]) => {
     console.warn('[Code Cosmos]', message, ...args);
-
   },
 
   error: (message: string, ...args: any[]) => {
     console.error('[Code Cosmos]', message, ...args);
-  }
+  },
 };

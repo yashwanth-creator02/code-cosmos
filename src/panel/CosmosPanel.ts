@@ -1,0 +1,95 @@
+// src/panel/CosmosPanel.ts
+
+import * as vscode from 'vscode';
+import { logger } from '../utils/logger';
+
+export class CosmosPanel {
+  private static instance: CosmosPanel | undefined;
+
+  private readonly panel: vscode.WebviewPanel;
+  private readonly extensionUri: vscode.Uri;
+
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+    this.panel = panel;
+    this.extensionUri = extensionUri;
+
+    this.panel.webview.html = this.getHtmlContent();
+
+    this.panel.onDidDispose(() => this.dispose());
+
+    this.panel.webview.onDidReceiveMessage((message) => {
+      logger.log('Message received from webview', message);
+    });
+  }
+
+  public static createOrShow(extensionUri: vscode.Uri): CosmosPanel {
+    if (CosmosPanel.instance) {
+      CosmosPanel.instance.panel.reveal();
+      logger.log('CosmosPanel already exists, revealing');
+      return CosmosPanel.instance;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      'codeCosmos',
+      'Code Cosmos',
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'out')],
+      }
+    );
+
+    logger.log('CosmosPanel created');
+    CosmosPanel.instance = new CosmosPanel(panel, extensionUri);
+    return CosmosPanel.instance;
+  }
+
+  public sendMessage(message: unknown): void {
+    this.panel.webview.postMessage(message);
+    logger.log('CosmosPanel.sendMessage', message);
+  }
+
+  private getHtmlContent(): string {
+    const scriptUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'out', 'webview', 'main.js')
+    );
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta http-equiv="Content-Security-Policy"
+            content="
+              default-src 'none';
+              style-src ${this.panel.webview.cspSource} 'unsafe-inline';
+              script-src ${this.panel.webview.cspSource};
+              "
+            >
+          <style>
+            html, body {
+              width: 100%;
+              height: 100%;
+              margin: 0;
+              padding: 0;
+              background: black;
+              overflow: hidden;
+            }
+          </style>
+        </head>
+        <body>
+          <h1 style="color: white; font-family: sans-serif; padding: 20px;">
+            Code Cosmos Loading...
+          </h1>
+          <script src="${scriptUri}"></script>
+        </body>
+      </html>
+    `;
+  }
+
+  private dispose(): void {
+    CosmosPanel.instance = undefined;
+    this.panel.dispose();
+    logger.log('CosmosPanel disposed');
+  }
+}

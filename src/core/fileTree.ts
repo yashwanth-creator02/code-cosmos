@@ -4,19 +4,38 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { CosmosData, CosmosFile, CosmosFolder, FileType } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
+import { logger } from '../utils/logger';
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
-    case 'ts': case 'tsx': return FileType.TS;
-    case 'js': case 'jsx': return FileType.JS;
-    case 'html': return FileType.HTML;
-    case 'css': case 'scss': case 'sass': return FileType.CSS;
-    case 'py': return FileType.PY;
-    case 'java': return FileType.JAVA;
-    case 'png': case 'jpg': case 'jpeg':
-    case 'gif': case 'svg': case 'ico':
-    case 'woff': case 'woff2': case 'ttf': return FileType.ASSET;
-    default: return FileType.OTHER;
+    case 'ts':
+    case 'tsx':
+      return FileType.TS;
+    case 'js':
+    case 'jsx':
+      return FileType.JS;
+    case 'html':
+      return FileType.HTML;
+    case 'css':
+    case 'scss':
+    case 'sass':
+      return FileType.CSS;
+    case 'py':
+      return FileType.PY;
+    case 'java':
+      return FileType.JAVA;
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'svg':
+    case 'ico':
+    case 'woff':
+    case 'woff2':
+    case 'ttf':
+      return FileType.ASSET;
+    default:
+      return FileType.OTHER;
   }
 }
 
@@ -32,7 +51,6 @@ async function traverseDirectory(
   const relativePath = path.relative(workspaceRoot, dirUri.fsPath) || '.';
   const folderId = relativePath;
 
-  // Register this folder if not already root
   if (!data.folders[folderId]) {
     const folder: CosmosFolder = {
       id: folderId,
@@ -41,7 +59,7 @@ async function traverseDirectory(
       relativePath,
       parentId: parentFolderId,
       fileIds: [],
-      childFolderIds: []
+      childFolderIds: [],
     };
     data.folders[folderId] = folder;
 
@@ -54,11 +72,13 @@ async function traverseDirectory(
     const entryUri = vscode.Uri.joinPath(dirUri, name);
     const entryRelative = path.relative(workspaceRoot, entryUri.fsPath);
 
-    if (shouldExclude(entryRelative, exclusions)) continue;
+    if (shouldExclude(entryRelative, exclusions)) {
+      logger.log(`Excluding: ${entryRelative}`);
+      continue;
+    }
 
     if (fileType === vscode.FileType.Directory) {
       await traverseDirectory(entryUri, workspaceRoot, exclusions, data, folderId);
-
     } else if (fileType === vscode.FileType.File) {
       const extension = name.includes('.') ? name.split('.').pop() || '' : '';
       const stat = await vscode.workspace.fs.stat(entryUri);
@@ -71,11 +91,12 @@ async function traverseDirectory(
         extension,
         type: getFileType(extension),
         size: stat.size,
-        folderId
+        folderId,
       };
 
       data.files[entryRelative] = file;
       data.folders[folderId].fileIds.push(entryRelative);
+      logger.log(`Found file: ${entryRelative}`);
     }
   }
 }
@@ -87,16 +108,18 @@ export async function buildFileTree(): Promise<CosmosData> {
   }
 
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
+  logger.log(`Building file tree for: ${workspaceRoot}`);
+
   const exclusions = await buildExclusionList(workspaceRoot);
+  logger.log(`Exclusions loaded: ${exclusions.join(', ')}`);
 
   const data: CosmosData = {
     files: {},
     folders: {},
     dependencies: [],
-    rootFolderId: '.'
+    rootFolderId: '.',
   };
 
-  // Register root folder first
   data.folders['.'] = {
     id: '.',
     name: path.basename(workspaceRoot),
@@ -104,15 +127,13 @@ export async function buildFileTree(): Promise<CosmosData> {
     relativePath: '.',
     parentId: null,
     fileIds: [],
-    childFolderIds: []
+    childFolderIds: [],
   };
 
-  await traverseDirectory(
-    workspaceFolders[0].uri,
-    workspaceRoot,
-    exclusions,
-    data,
-    null
+  await traverseDirectory(workspaceFolders[0].uri, workspaceRoot, exclusions, data, null);
+
+  logger.log(
+    `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders`
   );
 
   return data;
