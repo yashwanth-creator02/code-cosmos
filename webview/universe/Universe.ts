@@ -86,6 +86,7 @@ export class Universe {
     this.initSpacecraftMode();
     this.initSearch();
     this.initResetButton();
+    this.initHelpButton();
     this.addBackgroundStars();
     this.animate();
   }
@@ -438,10 +439,16 @@ export class Universe {
       }
       if (e.key === 'Escape') {
         container.style.display = 'none';
+        document.getElementById('shortcuts-panel')!.style.display = 'none';
         this.exitFocusMode();
       }
       if (e.key === 'r' || e.key === 'R') {
         this.resetCamera();
+      }
+      if (e.key === '?') {
+        const panel = document.getElementById('shortcuts-panel')!;
+        const isVisible = panel.style.display === 'block';
+        panel.style.display = isVisible ? 'none' : 'block';
       }
     });
 
@@ -805,6 +812,23 @@ export class Universe {
         targetPlanet.mesh.position.z
       );
       positions.needsUpdate = true;
+    });
+  }
+
+  private initHelpButton(): void {
+    const button = document.getElementById('help-button')!;
+    const panel = document.getElementById('shortcuts-panel')!;
+
+    button.addEventListener('click', () => {
+      const isVisible = panel.style.display === 'block';
+      panel.style.display = isVisible ? 'none' : 'block';
+    });
+
+    button.addEventListener('mouseenter', () => {
+      button.style.background = 'rgba(255,255,255,0.1)';
+    });
+    button.addEventListener('mouseleave', () => {
+      button.style.background = 'rgba(0,0,0,0.85)';
     });
   }
 }
