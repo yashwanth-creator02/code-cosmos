@@ -121,6 +121,35 @@ export class CosmosPanel {
             z-index: 100;
             line-height: 1.6;
           "></div>
+          <div id="search-container" style="
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: none;
+          ">
+            <input id="search-input" type="text" placeholder="Search files..." style="
+              background: rgba(0,0,0,0.85);
+              border: 1px solid rgba(255,255,255,0.3);
+              color: white;
+              padding: 8px 14px;
+              border-radius: 6px;
+              font-size: 13px;
+              font-family: sans-serif;
+              width: 280px;
+              outline: none;
+            "/>
+            <div id="search-results" style="
+              background: rgba(0,0,0,0.85);
+              border: 1px solid rgba(255,255,255,0.15);
+              border-top: none;
+              border-radius: 0 0 6px 6px;
+              max-height: 200px;
+              overflow-y: auto;
+              display: none;
+            "></div>
+          </div>
           <script src="${scriptUri}"></script>
         </body>
       </html>

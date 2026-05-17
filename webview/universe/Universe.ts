@@ -106,6 +106,7 @@ export class Universe {
       });
     });
     this.drawDependencies(data.dependencies);
+    this.initSearch();
   }
 
   // Distributes points evenly across a sphere surface
@@ -301,5 +302,112 @@ export class Universe {
       const material = depLine.line.material as THREE.LineBasicMaterial;
       material.opacity = 0.4;
     });
+  }
+
+  private initSearch(): void {
+    const container = document.getElementById('search-container')!;
+    const input = document.getElementById('search-input') as HTMLInputElement;
+    const results = document.getElementById('search-results')!;
+
+    // Toggle search with Ctrl+F or /
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey && e.key === 'f') || e.key === '/') {
+        e.preventDefault();
+        const isVisible = container.style.display === 'block';
+        container.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+          input.value = '';
+          results.style.display = 'none';
+          input.focus();
+        }
+      }
+      if (e.key === 'Escape') {
+        container.style.display = 'none';
+        this.exitFocusMode();
+      }
+    });
+
+    // Filter results as user types
+    input.addEventListener('input', () => {
+      const query = input.value.trim().toLowerCase();
+      if (!query || !this.data) {
+        results.style.display = 'none';
+        return;
+      }
+
+      // Find matching files
+      const matches = Object.values(this.data.files)
+        .filter(f => f.name.toLowerCase().includes(query))
+        .slice(0, 8); // max 8 results
+
+      if (matches.length === 0) {
+        results.style.display = 'none';
+        return;
+      }
+
+      results.style.display = 'block';
+      results.innerHTML = matches.map(f => `
+      <div class="search-result" data-id="${f.id}" style="
+        padding: 8px 14px;
+        color: white;
+        font-family: sans-serif;
+        font-size: 12px;
+        cursor: pointer;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+      ">
+        <span style="opacity:0.5">${f.relativePath.replace(f.name, '')}</span>${f.name}
+      </div>
+    `).join('');
+
+      // Click a result — fly to planet
+      results.querySelectorAll('.search-result').forEach(el => {
+        el.addEventListener('click', () => {
+          const fileId = (el as HTMLElement).dataset.id!;
+          this.flyToPlanet(fileId);
+          container.style.display = 'none';
+        });
+
+        // Hover highlight
+        el.addEventListener('mouseenter', () => {
+          (el as HTMLElement).style.background = 'rgba(255,255,255,0.1)';
+        });
+        el.addEventListener('mouseleave', () => {
+          (el as HTMLElement).style.background = 'transparent';
+        });
+      });
+    });
+  }
+
+  private flyToPlanet(fileId: string): void {
+    const planet = this.planets.get(fileId);
+    if (!planet) { return; }
+
+    const target = planet.mesh.position.clone();
+
+    // Animate camera toward the planet
+    const startPosition = this.camera.position.clone();
+    const endPosition = target.clone().add(new THREE.Vector3(0, 0, 100));
+
+    let progress = 0;
+    const duration = 60; // frames
+
+    const fly = () => {
+      if (progress >= duration) {
+        this.enterFocusMode(fileId);
+        return;
+      }
+      progress++;
+      const t = progress / duration;
+      // Ease in-out
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+      this.camera.position.lerpVectors(startPosition, endPosition, eased);
+      this.controls.target.lerpVectors(this.controls.target, target, eased);
+      this.controls.update();
+
+      requestAnimationFrame(fly);
+    };
+
+    fly();
   }
 }
