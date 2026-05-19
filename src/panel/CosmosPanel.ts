@@ -1,81 +1,91 @@
 // src/panel/CosmosPanel.ts
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import { CosmosData } from '../types';
 import { logger } from '../utils/logger';
+
+type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
+
+type MessageFromWebview =
+  | { type: 'READY' }
+  | { type: 'OPEN_FILE'; payload: { fileId: string } };
 
 export class CosmosPanel {
   private static instance: CosmosPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
-  private lastData: unknown = null;
-  private isReady: boolean = false;
-  private pendingMessage: unknown = null;
+  private lastLoadMessage: LoadUniverseMessage | null = null;
+  private lastUniverseData: CosmosData | null = null;
+  private isReady = false;
+  private pendingMessage: LoadUniverseMessage | null = null;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
 
     this.panel.webview.html = this.getHtmlContent();
-
     this.panel.onDidDispose(() => this.dispose());
 
     this.panel.onDidChangeViewState((e) => {
-      if (e.webviewPanel.visible && this.lastData) {
-        this.panel.webview.postMessage(this.lastData);
+      if (e.webviewPanel.visible && this.lastLoadMessage) {
+        this.panel.webview.postMessage(this.lastLoadMessage);
         logger.log('Panel became visible — resending universe data');
       }
     });
 
-    this.panel.webview.onDidReceiveMessage(async (message: any) => {
+    this.panel.webview.onDidReceiveMessage(async (message: MessageFromWebview) => {
       logger.log('Message received from webview', message.type);
 
       if (message.type === 'READY') {
         this.isReady = true;
-        logger.log('Webview is ready');
-
-        // Send any pending message that was queued before webview was ready
         if (this.pendingMessage) {
           this.panel.webview.postMessage(this.pendingMessage);
-          this.lastData = this.pendingMessage;
+          this.lastLoadMessage = this.pendingMessage;
+          this.lastUniverseData = this.pendingMessage.payload;
           this.pendingMessage = null;
-          logger.log('Sent pending LOAD_UNIVERSE to webview');
         }
+        return;
       }
 
       if (message.type === 'OPEN_FILE') {
-        const fileId = message.payload.fileId;
-
-        // Handle namespaced file IDs from multiple workspaces
-        // Format: "workspaceName:relativePath"
-        let workspaceRoot: string | undefined;
-        let actualFileId = fileId;
-
-        if (fileId.includes(':')) {
-          const colonIndex = fileId.indexOf(':');
-          const workspaceName = fileId.substring(0, colonIndex);
-          actualFileId = fileId.substring(colonIndex + 1);
-
-          const folder = vscode.workspace.workspaceFolders?.find(
-            f => f.name === workspaceName
-          );
-          workspaceRoot = folder?.uri.fsPath;
-        } else {
-          workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        }
-
-        if (!workspaceRoot) { return; }
-
-        const fullPath = vscode.Uri.file(
-          require('path').join(workspaceRoot, actualFileId)
-        );
-        await vscode.window.showTextDocument(fullPath, {
-          viewColumn: vscode.ViewColumn.Beside,
-          preserveFocus: true,
-        });
-        logger.log(`Opened file: ${actualFileId}`);
+        await this.openFile(message.payload.fileId);
       }
     });
+  }
+
+  private async openFile(fileId: string): Promise<void> {
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    if (workspaceFolders.length === 0) {
+      return;
+    }
+
+    let workspaceRoot: string | undefined;
+    let actualFileId = fileId;
+
+    const colonIndex = fileId.indexOf(':');
+    if (colonIndex >= 0) {
+      const namespace = fileId.slice(0, colonIndex);
+      actualFileId = fileId.slice(colonIndex + 1);
+      workspaceRoot = this.lastUniverseData?.workspaceRoots?.[namespace];
+    }
+
+    if (!workspaceRoot) {
+      workspaceRoot = workspaceFolders[0]?.uri.fsPath;
+    }
+
+    if (!workspaceRoot) {
+      return;
+    }
+
+    const fullPath = vscode.Uri.file(path.join(workspaceRoot, actualFileId));
+    await vscode.window.showTextDocument(fullPath, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preserveFocus: true,
+    });
+
+    logger.log(`Opened file: ${actualFileId}`);
   }
 
   public static createOrShow(extensionUri: vscode.Uri): CosmosPanel {
@@ -101,22 +111,24 @@ export class CosmosPanel {
     return CosmosPanel.instance;
   }
 
-  public sendMessage(message: any): void {
+  public sendMessage(message: LoadUniverseMessage): void {
     if (message.type === 'LOAD_UNIVERSE') {
+      this.lastLoadMessage = message;
+      this.lastUniverseData = message.payload;
+
       if (this.isReady) {
-        // Webview is ready — send immediately
         this.panel.webview.postMessage(message);
-        this.lastData = message;
-        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (immediate)');
       } else {
-        // Webview not ready yet — queue it
         this.pendingMessage = message;
-        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (queued — waiting for READY)');
       }
-    } else {
-      this.panel.webview.postMessage(message);
-      logger.log('CosmosPanel.sendMessage', message.type);
+      return;
     }
+
+    this.panel.webview.postMessage(message);
+  }
+
+  private dispose(): void {
+    CosmosPanel.instance = undefined;
   }
 
   private getHtmlContent(): string {
@@ -150,7 +162,6 @@ export class CosmosPanel {
         <body>
           <canvas id="cosmos-canvas" style="width:100%;height:100%;display:block;"></canvas>
 
-          <!-- Loading overlay -->
           <div id="loading-overlay" style="
             position: fixed;
             top: 0; left: 0;
@@ -184,7 +195,6 @@ export class CosmosPanel {
             }
           </style>
 
-          <!-- Tooltip -->
           <div id="tooltip" style="
             position: fixed;
             display: none;
@@ -200,7 +210,6 @@ export class CosmosPanel {
             line-height: 1.6;
           "></div>
 
-          <!-- Search -->
           <div id="search-container" style="
             position: fixed;
             top: 16px;
@@ -231,7 +240,6 @@ export class CosmosPanel {
             "></div>
           </div>
 
-          <!-- Reset button -->
           <button id="reset-camera" style="
             position: fixed;
             bottom: 20px;
@@ -247,110 +255,45 @@ export class CosmosPanel {
             z-index: 100;
           ">⟳ Reset View</button>
 
-          <!-- Help button -->
           <button id="help-button" style="
-            position: fixed;
-            top: 20px;
-            right: 110px;
-            background: rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: white;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            font-family: sans-serif;
-            font-size: 14px;
-            cursor: pointer;
-            z-index: 100;
-          ">?</button>
-
-          <!-- Mode indicator -->
-          <div id="mode-indicator" style="
-            position: fixed;
-            bottom: 60px;
-            right: 20px;
-            background: rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: white;
-            padding: 8px 14px;
-            border-radius: 6px;
-            font-family: sans-serif;
-            font-size: 12px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            z-index: 100;
-          "></div>
-
-          <!-- Legend -->
-          <div id="legend" style="
             position: fixed;
             bottom: 20px;
             left: 20px;
             background: rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.15);
-            color: white;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-family: sans-serif;
-            font-size: 11px;
-            z-index: 100;
-            line-height: 1.8;
-          ">
-            <div style="font-weight:bold;margin-bottom:6px;opacity:0.6;font-size:10px;letter-spacing:1px;">DEPENDENCIES</div>
-            <div><span style="color:#ffffff">⬤</span> Direct import</div>
-            <div><span style="color:#4488ff">⬤</span> Indirect chain</div>
-            <div><span style="color:#FFB300">⬤</span> Shared dependent</div>
-            <div><span style="color:#00BCD4">⬤</span> Shared dependency</div>
-            <div><span style="color:#FF1744">⬤</span> Circular — danger</div>
-            <div style="margin-top:8px;font-weight:bold;opacity:0.6;font-size:10px;letter-spacing:1px;">OBJECTS</div>
-            <div>⭐ Central sun — repository root</div>
-            <div>🔆 Star — folder</div>
-            <div>⬤ Planet — file</div>
-          </div>
-
-          <!-- Keyboard shortcuts panel -->
-          <div id="shortcuts-panel" style="
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.92);
             border: 1px solid rgba(255,255,255,0.2);
             color: white;
-            padding: 24px 32px;
-            border-radius: 12px;
+            padding: 8px 16px;
+            border-radius: 6px;
             font-family: sans-serif;
-            font-size: 13px;
-            z-index: 200;
+            font-size: 12px;
+            cursor: pointer;
+            z-index: 100;
+          ">? Help</button>
+
+          <div id="shortcuts-panel" style="
+            position: fixed;
+            bottom: 60px;
+            left: 20px;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-family: sans-serif;
+            font-size: 12px;
+            line-height: 1.7;
             display: none;
-            min-width: 320px;
-            line-height: 2;
+            z-index: 100;
           ">
-            <div style="font-weight:bold;font-size:16px;margin-bottom:16px;">⌨ Keyboard Shortcuts</div>
-            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;">
-              <kbd style="opacity:0.6">/ or Ctrl+F</kbd><span>Search files</span>
-              <kbd style="opacity:0.6">R</kbd><span>Reset camera view</span>
-              <kbd style="opacity:0.6">F</kbd><span>Toggle spacecraft mode</span>
-              <kbd style="opacity:0.6">W A S D</kbd><span>Fly in spacecraft mode</span>
-              <kbd style="opacity:0.6">Q / E</kbd><span>Fly up / down</span>
-              <kbd style="opacity:0.6">Shift</kbd><span>Speed boost in spacecraft</span>
-              <kbd style="opacity:0.6">Click planet</kbd><span>Open file + focus mode</span>
-              <kbd style="opacity:0.6">Click again</kbd><span>Exit focus mode</span>
-              <kbd style="opacity:0.6">Escape</kbd><span>Exit focus / search</span>
-              <kbd style="opacity:0.6">?</kbd><span>Toggle this panel</span>
-            </div>
-            <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
+            <strong>Shortcuts</strong><br>
+            / or Ctrl+F: Search<br>
+            R: Reset view<br>
+            Esc: Exit focus / close panels
           </div>
 
-          <script src="${scriptUri}"></script>
+          <script type="module" src="${scriptUri}"></script>
         </body>
       </html>
     `;
-  }
-
-  private dispose(): void {
-    CosmosPanel.instance = undefined;
-    this.panel.dispose();
-    logger.log('CosmosPanel disposed');
   }
 }

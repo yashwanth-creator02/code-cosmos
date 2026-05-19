@@ -18,6 +18,7 @@ export enum DependencyLayer {
   LAYER3_SHARED_DEPENDENT = 'layer3_shared_dependent',
   LAYER3_SHARED_DEPENDENCY = 'layer3_shared_dependency',
 }
+
 export enum DependencyType {
   IMPORT = 'import',
   REFERENCE = 'reference',
@@ -58,4 +59,5 @@ export interface CosmosData {
   folders: Record<string, CosmosFolder>;
   dependencies: CosmosDependency[];
   rootFolderId: string;
+  workspaceRoots: Record<string, string>;
 }

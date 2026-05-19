@@ -6,6 +6,8 @@ import { CosmosDependency, DependencyLayer } from '../../src/types';
 export class DependencyLine {
   public line: THREE.Line;
   public dependency: CosmosDependency;
+  public readonly baseOpacity: number;
+  public readonly drawPriority: number;
 
   constructor(
     dependency: CosmosDependency,
@@ -19,32 +21,42 @@ export class DependencyLine {
 
     let color: number;
     let opacity: number;
+    let priority: number;
 
     switch (dependency.layer) {
       case DependencyLayer.CIRCULAR:
-        color = 0xFF1744;   // red — danger
-        opacity = 0.8;      // very visible
+        color = 0xff1744;
+        opacity = 0.8;
+        priority = 0;
         break;
       case DependencyLayer.DIRECT:
         color = 0xffffff;
         opacity = 0.4;
+        priority = 1;
         break;
       case DependencyLayer.INDIRECT:
         color = 0x4488ff;
-        opacity = 0.01;
+        opacity = 0.08;
+        priority = 2;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENT:
-        color = 0xFFB300;  // amber — shared parent
+        color = 0xffb300;
         opacity = 0.04;
+        priority = 3;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENCY:
-        color = 0x00BCD4;  // teal — shared foundation
+        color = 0x00bcd4;
         opacity = 0.04;
+        priority = 4;
         break;
       default:
         color = 0xffffff;
         opacity = 0.1;
+        priority = 5;
     }
+
+    this.baseOpacity = opacity;
+    this.drawPriority = priority;
 
     const material = new THREE.LineBasicMaterial({
       color,
