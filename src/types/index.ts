@@ -25,6 +25,31 @@ export enum DependencyType {
   LINK = 'link',
 }
 
+export enum DependencyResolutionKind {
+  RELATIVE = 'relative',
+  ALIAS = 'alias',
+  BASE_URL = 'base_url',
+  ROOT_RELATIVE = 'root_relative',
+  WORKSPACE = 'workspace',
+  JAVA_PACKAGE = 'java_package',
+}
+
+export enum DependencyReferenceKind {
+  STATIC_IMPORT = 'static_import',
+  RE_EXPORT = 're_export',
+  COMMONJS_REQUIRE = 'commonjs_require',
+  DYNAMIC_IMPORT = 'dynamic_import',
+  IMPORT_META_URL = 'import_meta_url',
+  TEST_MOCK = 'test_mock',
+  TRIPLE_SLASH = 'triple_slash',
+  HTML_ATTRIBUTE = 'html_attribute',
+  HTML_SRCSET = 'html_srcset',
+  CSS_IMPORT = 'css_import',
+  CSS_URL = 'css_url',
+  PYTHON_IMPORT = 'python_import',
+  JAVA_IMPORT = 'java_import',
+}
+
 export interface CosmosFile {
   id: string;
   name: string;
@@ -52,6 +77,9 @@ export interface CosmosDependency {
   targetId: string;
   layer: DependencyLayer;
   type: DependencyType;
+  specifier?: string;
+  resolvedBy?: DependencyResolutionKind;
+  referenceKind?: DependencyReferenceKind;
 }
 
 export interface CosmosData {

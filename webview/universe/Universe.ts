@@ -6,7 +6,15 @@ import { Star } from './Star';
 import { Planet } from './Planet';
 import { DependencyLine } from './DependencyLine';
 import { sendToExtension } from '../bridge/messageBridge';
-import { CosmosFolder, CosmosDependency, DependencyLayer, CosmosData } from '../../src/types';
+import {
+  CosmosFolder,
+  CosmosDependency,
+  DependencyLayer,
+  DependencyReferenceKind,
+  DependencyResolutionKind,
+  DependencyType,
+  CosmosData,
+} from '../../src/types';
 
 export class Universe {
   private scene: THREE.Scene;
@@ -475,7 +483,12 @@ export class Universe {
         return;
       }
 
-      const layerInfo = this.getLayerInfo(depLine.dependency.layer);
+      const dependencyInfo = this.getDependencyInfo(depLine.dependency);
+      const dependencyDetail = this.getDependencyDetail(depLine.dependency);
+      const layerInfo = {
+        color: dependencyInfo.color,
+        label: dependencyDetail ? `${dependencyInfo.label} (${dependencyDetail})` : dependencyInfo.label,
+      };
 
       tooltip.style.display = 'block';
       tooltip.style.left = `${event.clientX + 15}px`;
@@ -1034,6 +1047,93 @@ export class Universe {
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(50, 12, 1);
     return sprite;
+  }
+
+  private getDependencyInfo(dependency: CosmosDependency): { label: string; color: string } {
+    if (dependency.layer === DependencyLayer.DIRECT && dependency.type === DependencyType.REFERENCE) {
+      return { label: 'Direct reference', color: '#7ee787' };
+    }
+
+    return this.getLayerInfo(dependency.layer);
+  }
+
+  private getDependencyDetail(dependency: CosmosDependency): string {
+    const parts: string[] = [];
+
+    if (dependency.referenceKind) {
+      parts.push(this.formatReferenceKind(dependency.referenceKind));
+    }
+
+    if (dependency.resolvedBy) {
+      parts.push(`via ${this.formatResolutionKind(dependency.resolvedBy)}`);
+    }
+
+    if (dependency.specifier) {
+      parts.push(`"${this.escapeHtml(dependency.specifier)}"`);
+    }
+
+    return parts.join(' - ');
+  }
+
+  private formatReferenceKind(kind: DependencyReferenceKind): string {
+    switch (kind) {
+      case DependencyReferenceKind.STATIC_IMPORT:
+        return 'static import';
+      case DependencyReferenceKind.RE_EXPORT:
+        return 're-export';
+      case DependencyReferenceKind.COMMONJS_REQUIRE:
+        return 'CommonJS require';
+      case DependencyReferenceKind.DYNAMIC_IMPORT:
+        return 'dynamic import';
+      case DependencyReferenceKind.IMPORT_META_URL:
+        return 'import.meta URL';
+      case DependencyReferenceKind.TEST_MOCK:
+        return 'test mock';
+      case DependencyReferenceKind.TRIPLE_SLASH:
+        return 'triple-slash reference';
+      case DependencyReferenceKind.HTML_ATTRIBUTE:
+        return 'HTML attribute';
+      case DependencyReferenceKind.HTML_SRCSET:
+        return 'HTML srcset';
+      case DependencyReferenceKind.CSS_IMPORT:
+        return 'CSS import';
+      case DependencyReferenceKind.CSS_URL:
+        return 'CSS url';
+      case DependencyReferenceKind.PYTHON_IMPORT:
+        return 'Python import';
+      case DependencyReferenceKind.JAVA_IMPORT:
+        return 'Java import';
+      default:
+        return 'reference';
+    }
+  }
+
+  private formatResolutionKind(kind: DependencyResolutionKind): string {
+    switch (kind) {
+      case DependencyResolutionKind.RELATIVE:
+        return 'relative path';
+      case DependencyResolutionKind.ALIAS:
+        return 'alias';
+      case DependencyResolutionKind.BASE_URL:
+        return 'baseUrl';
+      case DependencyResolutionKind.ROOT_RELATIVE:
+        return 'root-relative path';
+      case DependencyResolutionKind.WORKSPACE:
+        return 'workspace path';
+      case DependencyResolutionKind.JAVA_PACKAGE:
+        return 'Java package';
+      default:
+        return 'resolver';
+    }
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private getLayerInfo(layer: DependencyLayer): { label: string; color: string } {

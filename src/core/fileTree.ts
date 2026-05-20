@@ -199,7 +199,7 @@ export async function buildFileTree(
   await traverseDirectory(workspaceFolder.uri, workspaceRoot, exclusions, data, null, new Set());
 
   logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
-  const directDeps = await parseDependencies(data);
+  const directDeps = await parseDependencies(data, workspaceRoot);
   const indirectDeps = computeIndirectDependencies(directDeps);
   const circularDeps = detectCircularDependencies(directDeps);
   const layer3Deps = computeLayer3Dependencies(directDeps);
@@ -220,4 +220,3 @@ export async function buildFileTree(
 
   return data;
 }
-

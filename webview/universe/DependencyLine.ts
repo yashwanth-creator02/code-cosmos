@@ -1,7 +1,7 @@
 // webview/universe/DependencyLine.ts
 
 import * as THREE from 'three';
-import { CosmosDependency, DependencyLayer } from '../../src/types';
+import { CosmosDependency, DependencyLayer, DependencyType } from '../../src/types';
 
 export class DependencyLine {
   public line: THREE.Line;
@@ -30,8 +30,8 @@ export class DependencyLine {
         priority = 0;
         break;
       case DependencyLayer.DIRECT:
-        color = 0xffffff;
-        opacity = 0.4;
+        color = dependency.type === DependencyType.REFERENCE ? 0x7ee787 : 0xffffff;
+        opacity = dependency.type === DependencyType.REFERENCE ? 0.32 : 0.4;
         priority = 1;
         break;
       case DependencyLayer.INDIRECT:

@@ -2,7 +2,14 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CosmosData, CosmosDependency, DependencyLayer, DependencyType } from '../types';
+import {
+  CosmosData,
+  CosmosDependency,
+  DependencyLayer,
+  DependencyReferenceKind,
+  DependencyResolutionKind,
+  DependencyType,
+} from '../types';
 import { logger } from '../utils/logger';
 
 interface AliasMap {
@@ -14,7 +21,18 @@ interface ResolutionSettings {
   baseUrl?: string;
 }
 
-const DEPENDENCY_EXTENSIONS = [
+interface ResolvedImport {
+  targetId: string;
+  resolvedBy: DependencyResolutionKind;
+}
+
+interface DependencyPattern {
+  regex: RegExp;
+  type: DependencyType;
+  referenceKind: DependencyReferenceKind;
+}
+
+const CODE_DEPENDENCY_EXTENSIONS = [
   '.ts',
   '.tsx',
   '.js',
@@ -31,6 +49,36 @@ const DEPENDENCY_EXTENSIONS = [
   '.json',
 ];
 
+const ASSET_DEPENDENCY_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.svg',
+  '.gif',
+  '.ico',
+  '.webp',
+  '.avif',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+];
+
+const DEPENDENCY_EXTENSIONS = [
+  ...CODE_DEPENDENCY_EXTENSIONS,
+  ...ASSET_DEPENDENCY_EXTENSIONS,
+];
+
+const HTML_REFERENCE_ATTRIBUTES = [
+  'src',
+  'href',
+  'poster',
+  'data-src',
+  'data-href',
+  'xlink:href',
+];
+
 function normalizePath(value: string): string {
   return value
     .replace(/\\/g, '/')
@@ -38,6 +86,28 @@ function normalizePath(value: string): string {
     .replace(/^\.\//, '')
     .replace(/^\/+/, '')
     .replace(/\/$/, '');
+}
+
+function stripSpecifierDecoration(value: string): string {
+  const trimmed = value.trim();
+  const queryIndex = trimmed.indexOf('?');
+  const hashIndex = trimmed.indexOf('#', trimmed.startsWith('#') ? 1 : 0);
+  const cutPoints = [queryIndex, hashIndex].filter((index) => index >= 0);
+
+  if (cutPoints.length === 0) {
+    return trimmed;
+  }
+
+  return trimmed.slice(0, Math.min(...cutPoints));
+}
+
+function isExternalSpecifier(value: string): boolean {
+  const specifier = value.trim().toLowerCase();
+  if (!specifier || specifier.startsWith('//')) {
+    return true;
+  }
+
+  return /^[a-z][a-z0-9+.-]*:/.test(specifier) && !/^[a-z]:[\\/]/i.test(specifier);
 }
 
 function stripJsonComments(content: string): string {
@@ -93,12 +163,74 @@ async function readConfigSettings(workspaceRoot: string, fileName: 'tsconfig.jso
   }
 }
 
+async function readPackageAliases(workspaceRoot: string): Promise<AliasMap> {
+  try {
+    const packageUri = vscode.Uri.file(path.join(workspaceRoot, 'package.json'));
+    const raw = await vscode.workspace.fs.readFile(packageUri);
+    const parsed = parseJsonConfig(Buffer.from(raw).toString('utf8'));
+    const aliases: AliasMap = {};
+
+    if (!parsed) {
+      return aliases;
+    }
+
+    const moduleAliases = parsed._moduleAliases;
+    if (moduleAliases && typeof moduleAliases === 'object' && !Array.isArray(moduleAliases)) {
+      for (const [alias, target] of Object.entries(moduleAliases)) {
+        if (typeof target === 'string') {
+          aliases[normalizePath(alias)] = normalizePath(target);
+        }
+      }
+    }
+
+    const imports = parsed.imports;
+    if (imports && typeof imports === 'object' && !Array.isArray(imports)) {
+      for (const [alias, target] of Object.entries(imports)) {
+        if (typeof target === 'string' && (target.startsWith('./') || target.startsWith('/'))) {
+          aliases[normalizePath(alias)] = normalizePath(target);
+        }
+      }
+    }
+
+    return aliases;
+  } catch {
+    return {};
+  }
+}
+
+async function readViteAliases(workspaceRoot: string): Promise<AliasMap> {
+  const aliases: AliasMap = {};
+  const configNames = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs'];
+
+  for (const configName of configNames) {
+    try {
+      const configUri = vscode.Uri.file(path.join(workspaceRoot, configName));
+      const raw = await vscode.workspace.fs.readFile(configUri);
+      const content = Buffer.from(raw).toString('utf8');
+      const aliasRegex = /['"]([^'"]+)['"]\s*:\s*path\.resolve\(\s*__dirname\s*,\s*['"]([^'"]+)['"]\s*\)/g;
+
+      let match: RegExpExecArray | null;
+      while ((match = aliasRegex.exec(content)) !== null) {
+        aliases[normalizePath(match[1])] = normalizePath(match[2]);
+      }
+    } catch {
+      // Config files are optional; keep scanning the other common names.
+    }
+  }
+
+  return aliases;
+}
+
 async function loadResolutionSettings(workspaceRoot: string): Promise<ResolutionSettings> {
   const tsConfig = await readConfigSettings(workspaceRoot, 'tsconfig.json');
   const jsConfig = await readConfigSettings(workspaceRoot, 'jsconfig.json');
+  const packageAliases = await readPackageAliases(workspaceRoot);
+  const viteAliases = await readViteAliases(workspaceRoot);
 
   return {
     aliases: {
+      ...packageAliases,
+      ...viteAliases,
       ...jsConfig.aliases,
       ...tsConfig.aliases,
     },
@@ -120,7 +252,15 @@ function buildNormalizedFileMap(data: CosmosData): Record<string, string> {
 }
 
 function stripExtension(candidate: string): string {
-  return candidate.replace(/\.[^/.]+$/, '');
+  const normalized = normalizePath(candidate);
+  const knownExtension = [...DEPENDENCY_EXTENSIONS].sort((a, b) => b.length - a.length)
+    .find((ext) => normalized.endsWith(ext));
+
+  if (knownExtension) {
+    return normalized.slice(0, -knownExtension.length);
+  }
+
+  return normalized.replace(/\.[^/.]+$/, '');
 }
 
 function tryResolveCandidate(candidate: string, normalizedFileIds: Record<string, string>): string | null {
@@ -147,18 +287,85 @@ function tryResolveCandidate(candidate: string, normalizedFileIds: Record<string
   return null;
 }
 
+function tryResolveDecoratedCandidate(candidate: string, normalizedFileIds: Record<string, string>): string | null {
+  const cleanCandidate = stripSpecifierDecoration(candidate);
+  const resolved = tryResolveCandidate(cleanCandidate, normalizedFileIds);
+  if (resolved) {
+    return resolved;
+  }
+
+  const stripped = stripExtension(cleanCandidate);
+  if (stripped !== normalizePath(cleanCandidate)) {
+    return tryResolveCandidate(stripped, normalizedFileIds);
+  }
+
+  return null;
+}
+
+function resolveAliasRest(normalizedImport: string, normalizedAlias: string): string | null {
+  const starIndex = normalizedAlias.indexOf('*');
+  if (starIndex >= 0) {
+    const prefix = normalizedAlias.slice(0, starIndex);
+    const suffix = normalizedAlias.slice(starIndex + 1);
+
+    if (!normalizedImport.startsWith(prefix) || (suffix && !normalizedImport.endsWith(suffix))) {
+      return null;
+    }
+
+    return normalizedImport.slice(prefix.length, suffix ? -suffix.length : undefined).replace(/^\/+/, '');
+  }
+
+  if (normalizedImport === normalizedAlias) {
+    return '';
+  }
+
+  if (normalizedImport.startsWith(`${normalizedAlias}/`)) {
+    return normalizedImport.slice(normalizedAlias.length).replace(/^\/+/, '');
+  }
+
+  return null;
+}
+
+function applyAliasTarget(normalizedTarget: string, rest: string): string {
+  if (normalizedTarget.includes('*')) {
+    return normalizePath(normalizedTarget.replace('*', rest));
+  }
+
+  return rest ? normalizePath(`${normalizedTarget}/${rest}`) : normalizedTarget;
+}
+
 function resolveImport(
   importPath: string,
   sourceFile: string,
   settings: ResolutionSettings,
-  normalizedFileIds: Record<string, string>
-): string | null {
-  const normalizedImport = normalizePath(importPath);
+  normalizedFileIds: Record<string, string>,
+  allowWorkspaceRoot = false
+): ResolvedImport | null {
+  const cleanImport = stripSpecifierDecoration(importPath);
+  if (!cleanImport || isExternalSpecifier(cleanImport)) {
+    return null;
+  }
+
+  const normalizedImport = normalizePath(cleanImport);
   const normalizedSource = normalizePath(sourceFile);
+  const importSlashes = cleanImport.replace(/\\/g, '/');
 
   for (const [alias, target] of Object.entries(settings.aliases)) {
     const aliasBase = normalizePath(alias);
     const targetBase = normalizePath(target);
+    const aliasRest = resolveAliasRest(normalizedImport, aliasBase);
+
+    if (aliasRest !== null) {
+      const aliasResolved = applyAliasTarget(targetBase, aliasRest);
+      const resolved = tryResolveDecoratedCandidate(aliasResolved, normalizedFileIds);
+      if (resolved) {
+        logger.log(`Alias resolved: ${importPath} -> ${resolved}`);
+        return {
+          targetId: resolved,
+          resolvedBy: DependencyResolutionKind.ALIAS,
+        };
+      }
+    }
 
     if (aliasBase.endsWith('/*')) {
       const aliasPrefix = aliasBase.slice(0, -2);
@@ -168,7 +375,10 @@ function resolveImport(
         const resolved = tryResolveCandidate(aliasResolved, normalizedFileIds);
         if (resolved) {
           logger.log(`Alias resolved: ${importPath} → ${resolved}`);
-          return resolved;
+          return {
+            targetId: resolved,
+            resolvedBy: DependencyResolutionKind.ALIAS,
+          };
         }
       }
       continue;
@@ -180,39 +390,76 @@ function resolveImport(
       const resolved = tryResolveCandidate(aliasResolved, normalizedFileIds);
       if (resolved) {
         logger.log(`Alias resolved: ${importPath} → ${resolved}`);
-        return resolved;
+        return {
+          targetId: resolved,
+          resolvedBy: DependencyResolutionKind.ALIAS,
+        };
       }
     }
   }
 
-  const isRelative = normalizedImport.startsWith('.') || normalizedImport.startsWith('..');
-  const isRootRelative = normalizedImport.startsWith('/');
+  const isRelative = importSlashes.startsWith('./') || importSlashes.startsWith('../');
+  const isRootRelative = importSlashes.startsWith('/');
 
   let baseCandidate: string | null = null;
+  let resolvedBy: DependencyResolutionKind | null = null;
   if (isRelative) {
-    baseCandidate = path.join(path.dirname(normalizedSource), normalizedImport);
+    baseCandidate = path.posix.join(path.posix.dirname(normalizedSource), normalizedImport);
+    resolvedBy = DependencyResolutionKind.RELATIVE;
   } else if (isRootRelative) {
-    baseCandidate = normalizedImport.slice(1);
+    baseCandidate = normalizedImport;
+    resolvedBy = DependencyResolutionKind.ROOT_RELATIVE;
   } else if (settings.baseUrl) {
-    baseCandidate = path.join(settings.baseUrl, normalizedImport);
+    baseCandidate = path.posix.join(settings.baseUrl, normalizedImport);
+    resolvedBy = DependencyResolutionKind.BASE_URL;
+  } else if (allowWorkspaceRoot) {
+    baseCandidate = normalizedImport;
+    resolvedBy = DependencyResolutionKind.WORKSPACE;
   }
 
-  if (!baseCandidate) {
+  if (!baseCandidate || !resolvedBy) {
     return null;
   }
 
   const normalizedCandidate = normalizePath(baseCandidate);
-  const resolved = tryResolveCandidate(normalizedCandidate, normalizedFileIds);
+  const resolved = tryResolveDecoratedCandidate(normalizedCandidate, normalizedFileIds);
   if (resolved) {
-    return resolved;
+    return {
+      targetId: resolved,
+      resolvedBy,
+    };
   }
 
   const stripped = stripExtension(normalizedCandidate);
   if (stripped !== normalizedCandidate) {
-    return tryResolveCandidate(stripped, normalizedFileIds);
+    const strippedResolved = tryResolveCandidate(stripped, normalizedFileIds);
+    if (strippedResolved) {
+      return {
+        targetId: strippedResolved,
+        resolvedBy,
+      };
+    }
   }
 
   return null;
+}
+
+function createDirectDependency(
+  sourceId: string,
+  resolved: ResolvedImport,
+  type: DependencyType,
+  specifier: string,
+  referenceKind: DependencyReferenceKind
+): CosmosDependency {
+  return {
+    sourceId,
+    targetId: resolved.targetId,
+    layer: DependencyLayer.DIRECT,
+    type,
+    specifier: specifier.trim(),
+    resolvedBy: resolved.resolvedBy,
+    referenceKind,
+  };
 }
 
 function parseWithRegexes(
@@ -226,27 +473,74 @@ function parseWithRegexes(
     .replace(/\/\/.*$/gm, '')
     .replace(/\/\*[\s\S]*?\*\//g, '');
 
-  const regexes = [
-    /\bimport\s+(?:type\s+)?(?:[\w*\s{},]+\s+from\s+)?['"]([^'"]+)['"]/g,
-    /\bexport\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g,
-    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  const tripleSlashRegex = /\/\/\/\s*<reference\s+path=["']([^"']+)["']/g;
+  let tripleSlashMatch: RegExpExecArray | null;
+  while ((tripleSlashMatch = tripleSlashRegex.exec(content)) !== null) {
+    const resolved = resolveImport(tripleSlashMatch[1], fileId, settings, normalizedFileIds);
+    if (resolved) {
+      deps.push(createDirectDependency(
+        fileId,
+        resolved,
+        DependencyType.REFERENCE,
+        tripleSlashMatch[1],
+        DependencyReferenceKind.TRIPLE_SLASH
+      ));
+    }
+  }
+
+  const patterns: DependencyPattern[] = [
+    {
+      regex: /\bimport\s+(?:type\s+)?(?:[\w*$\s{},]+\s+from\s+)?['"]([^'"]+)['"]/g,
+      type: DependencyType.IMPORT,
+      referenceKind: DependencyReferenceKind.STATIC_IMPORT,
+    },
+    {
+      regex: /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g,
+      type: DependencyType.IMPORT,
+      referenceKind: DependencyReferenceKind.RE_EXPORT,
+    },
+    {
+      regex: /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      type: DependencyType.IMPORT,
+      referenceKind: DependencyReferenceKind.COMMONJS_REQUIRE,
+    },
+    {
+      regex: /\brequire\.resolve\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      type: DependencyType.REFERENCE,
+      referenceKind: DependencyReferenceKind.COMMONJS_REQUIRE,
+    },
+    {
+      regex: /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      type: DependencyType.IMPORT,
+      referenceKind: DependencyReferenceKind.DYNAMIC_IMPORT,
+    },
+    {
+      regex: /\bnew\s+URL\s*\(\s*['"]([^'"]+)['"]\s*,\s*import\.meta\.url\s*\)/g,
+      type: DependencyType.REFERENCE,
+      referenceKind: DependencyReferenceKind.IMPORT_META_URL,
+    },
+    {
+      regex: /\b(?:jest|vi)\.(?:mock|doMock|unmock|requireActual|requireMock)\s*\(\s*['"]([^'"]+)['"]/g,
+      type: DependencyType.REFERENCE,
+      referenceKind: DependencyReferenceKind.TEST_MOCK,
+    },
   ];
 
-  for (const regex of regexes) {
+  for (const pattern of patterns) {
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(withoutComments)) !== null) {
-      const resolvedId = resolveImport(match[1], fileId, settings, normalizedFileIds);
-      if (!resolvedId) {
+    while ((match = pattern.regex.exec(withoutComments)) !== null) {
+      const resolved = resolveImport(match[1], fileId, settings, normalizedFileIds);
+      if (!resolved) {
         continue;
       }
 
-      deps.push({
-        sourceId: fileId,
-        targetId: resolvedId,
-        layer: DependencyLayer.DIRECT,
-        type: DependencyType.IMPORT,
-      });
+      deps.push(createDirectDependency(
+        fileId,
+        resolved,
+        pattern.type,
+        match[1],
+        pattern.referenceKind
+      ));
     }
   }
 
@@ -256,37 +550,87 @@ function parseWithRegexes(
 function parseHtmlDependencies(
   content: string,
   fileId: string,
+  settings: ResolutionSettings,
   normalizedFileIds: Record<string, string>
 ): CosmosDependency[] {
   const deps: CosmosDependency[] = [];
-  const refRegex = /(?:src|href)=["']([^"'#]+)["']/g;
+  const attributePattern = HTML_REFERENCE_ATTRIBUTES.join('|').replace(/:/g, '\\:');
+  const refRegex = new RegExp(`\\b(?:${attributePattern})\\s*=\\s*["']([^"']+)["']`, 'gi');
 
   let match: RegExpExecArray | null;
   while ((match = refRegex.exec(content)) !== null) {
     const refPath = match[1];
-    if (
-      refPath.startsWith('http') ||
-      refPath.startsWith('//') ||
-      refPath.startsWith('data:') ||
-      refPath.startsWith('mailto:')
-    ) {
+    if (isExternalSpecifier(refPath)) {
       continue;
     }
 
-    const resolved = resolveHtmlPath(refPath, fileId, normalizedFileIds);
+    const resolved = resolveReferencePath(refPath, fileId, settings, normalizedFileIds);
     if (!resolved) {
       continue;
     }
 
-    deps.push({
-      sourceId: fileId,
-      targetId: resolved,
-      layer: DependencyLayer.DIRECT,
-      type: DependencyType.REFERENCE,
-    });
+    deps.push(createDirectDependency(
+      fileId,
+      resolved,
+      DependencyType.REFERENCE,
+      refPath,
+      DependencyReferenceKind.HTML_ATTRIBUTE
+    ));
+  }
+
+  const srcsetRegex = /\bsrcset\s*=\s*["']([^"']+)["']/gi;
+  let srcsetMatch: RegExpExecArray | null;
+  while ((srcsetMatch = srcsetRegex.exec(content)) !== null) {
+    for (const refPath of parseSrcset(srcsetMatch[1])) {
+      if (isExternalSpecifier(refPath)) {
+        continue;
+      }
+
+      const resolved = resolveReferencePath(refPath, fileId, settings, normalizedFileIds);
+      if (!resolved) {
+        continue;
+      }
+
+      deps.push(createDirectDependency(
+        fileId,
+        resolved,
+        DependencyType.REFERENCE,
+        refPath,
+        DependencyReferenceKind.HTML_SRCSET
+      ));
+    }
   }
 
   return deps;
+}
+
+function parseSrcset(value: string): string[] {
+  return value
+    .split(',')
+    .map((candidate) => candidate.trim().split(/\s+/)[0])
+    .filter(Boolean);
+}
+
+function resolveReferencePath(
+  refPath: string,
+  sourceFile: string,
+  settings: ResolutionSettings,
+  normalizedFileIds: Record<string, string>
+): ResolvedImport | null {
+  const resolved = resolveImport(refPath, sourceFile, settings, normalizedFileIds, true);
+  if (resolved) {
+    return resolved;
+  }
+
+  const fallback = resolveHtmlPath(refPath, sourceFile, normalizedFileIds);
+  if (!fallback) {
+    return null;
+  }
+
+  return {
+    targetId: fallback,
+    resolvedBy: DependencyResolutionKind.WORKSPACE,
+  };
 }
 
 function resolveHtmlPath(
@@ -294,18 +638,20 @@ function resolveHtmlPath(
   sourceFile: string,
   normalizedFileIds: Record<string, string>
 ): string | null {
-  const extensions = ['.js', '.ts', '.tsx', '.css', '.html', '.png', '.jpg', '.jpeg', '.svg', '.gif', '.ico', '.webp'];
   const candidateBases = new Set<string>();
   const normalizedSource = normalizePath(sourceFile);
-  const normalizedRef = normalizePath(refPath);
+  const cleanRef = stripSpecifierDecoration(refPath);
+  const normalizedRef = normalizePath(cleanRef);
+  const isRootRelative = cleanRef.replace(/\\/g, '/').startsWith('/');
 
-  candidateBases.add(path.join(path.dirname(normalizedSource), normalizedRef));
-  if (normalizedRef.startsWith('/')) {
-    candidateBases.add(normalizedRef.slice(1));
+  if (isRootRelative) {
+    candidateBases.add(normalizedRef);
+  } else {
+    candidateBases.add(path.posix.join(path.posix.dirname(normalizedSource), normalizedRef));
   }
 
   for (const root of ['public', 'static', 'assets', 'www', 'dist', 'src']) {
-    candidateBases.add(path.join(root, normalizedRef.startsWith('/') ? normalizedRef.slice(1) : normalizedRef));
+    candidateBases.add(path.posix.join(root, normalizedRef));
   }
 
   for (const base of candidateBases) {
@@ -315,14 +661,14 @@ function resolveHtmlPath(
       return exact;
     }
 
-    for (const ext of extensions) {
+    for (const ext of DEPENDENCY_EXTENSIONS) {
       const direct = normalizedFileIds[`${normalizedBase}${ext}`];
       if (direct) {
         return direct;
       }
     }
 
-    for (const ext of extensions) {
+    for (const ext of DEPENDENCY_EXTENSIONS) {
       const barrel = normalizedFileIds[`${normalizedBase}/index${ext}`];
       if (barrel) {
         return barrel;
@@ -340,21 +686,48 @@ function parseCssDependencies(
   normalizedFileIds: Record<string, string>
 ): CosmosDependency[] {
   const deps: CosmosDependency[] = [];
-  const cssRegex = /@import\s+(?:url\()?['"]([^'"\)]+)['"]\)?/g;
+  const importRegex = /@(import|use|forward)\s+(?:url\(\s*)?['"]?([^'"\);\s]+)['"]?\s*\)?/g;
 
   let match: RegExpExecArray | null;
-  while ((match = cssRegex.exec(content)) !== null) {
-    const resolvedId = resolveImport(match[1], fileId, settings, normalizedFileIds);
-    if (!resolvedId) {
+  while ((match = importRegex.exec(content)) !== null) {
+    const resolved = resolveImport(match[2], fileId, settings, normalizedFileIds, true);
+    if (!resolved) {
       continue;
     }
 
-    deps.push({
-      sourceId: fileId,
-      targetId: resolvedId,
-      layer: DependencyLayer.DIRECT,
-      type: DependencyType.IMPORT,
-    });
+    deps.push(createDirectDependency(
+      fileId,
+      resolved,
+      DependencyType.IMPORT,
+      match[2],
+      DependencyReferenceKind.CSS_IMPORT
+    ));
+  }
+
+  const urlRegex = /\burl\(\s*['"]?([^'"\)]+)['"]?\s*\)/g;
+  while ((match = urlRegex.exec(content)) !== null) {
+    const prefix = content.slice(Math.max(0, match.index - 12), match.index).toLowerCase();
+    if (/@import\s*$/.test(prefix)) {
+      continue;
+    }
+
+    const refPath = match[1].trim();
+    if (isExternalSpecifier(refPath)) {
+      continue;
+    }
+
+    const resolved = resolveReferencePath(refPath, fileId, settings, normalizedFileIds);
+    if (!resolved) {
+      continue;
+    }
+
+    deps.push(createDirectDependency(
+      fileId,
+      resolved,
+      DependencyType.REFERENCE,
+      refPath,
+      DependencyReferenceKind.CSS_URL
+    ));
   }
 
   return deps;
@@ -367,7 +740,7 @@ function parsePythonDependencies(
   normalizedFileIds: Record<string, string>
 ): CosmosDependency[] {
   const deps: CosmosDependency[] = [];
-  const pyRegex = /(?:from\s+([\w.]+)\s+import|^\s*import\s+([\w.]+))/gm;
+  const pyRegex = /(?:^\s*from\s+([\w.]+)\s+import|^\s*import\s+([\w.]+))/gm;
 
   let match: RegExpExecArray | null;
   while ((match = pyRegex.exec(content)) !== null) {
@@ -376,21 +749,132 @@ function parsePythonDependencies(
       continue;
     }
 
-    const normalizedPyPath = importPath.startsWith('.')
-      ? path.posix.normalize(`${'../'.repeat(Math.max((importPath.match(/\./g) || []).length - 1, 0))}${importPath.replace(/^\.+/, '')}`)
-      : importPath.replace(/\./g, '/');
+    const normalizedPyPath = pythonImportToPath(importPath);
 
-    const resolvedId = resolveImport(normalizedPyPath, fileId, settings, normalizedFileIds);
-    if (!resolvedId) {
+    const resolved = resolveImport(normalizedPyPath, fileId, settings, normalizedFileIds, true);
+    if (!resolved) {
       continue;
     }
 
-    deps.push({
-      sourceId: fileId,
-      targetId: resolvedId,
-      layer: DependencyLayer.DIRECT,
-      type: DependencyType.IMPORT,
-    });
+    deps.push(createDirectDependency(
+      fileId,
+      resolved,
+      DependencyType.IMPORT,
+      importPath,
+      DependencyReferenceKind.PYTHON_IMPORT
+    ));
+  }
+
+  return deps;
+}
+
+function pythonImportToPath(importPath: string): string {
+  const leadingDots = importPath.match(/^\.+/)?.[0].length ?? 0;
+  const importBody = importPath.replace(/^\.+/, '').replace(/\./g, '/');
+
+  if (leadingDots === 0) {
+    return importBody;
+  }
+
+  const relativePrefix = leadingDots === 1 ? './' : '../'.repeat(leadingDots - 1);
+  return `${relativePrefix}${importBody}`;
+}
+
+function buildJavaPackageIndex(data: CosmosData): Map<string, string> {
+  const index = new Map<string, string>();
+  const rootMarkers = [
+    'src/main/java/',
+    'src/test/java/',
+    'src/integrationTest/java/',
+    'src/',
+  ];
+
+  for (const file of Object.values(data.files)) {
+    if (file.extension.toLowerCase() !== 'java') {
+      continue;
+    }
+
+    const normalizedId = normalizePath(file.id).replace(/\.java$/, '');
+    const candidates = new Set<string>([normalizedId.replace(/\//g, '.')]);
+
+    for (const marker of rootMarkers) {
+      const markerIndex = normalizedId.indexOf(marker);
+      if (markerIndex >= 0) {
+        candidates.add(normalizedId.slice(markerIndex + marker.length).replace(/\//g, '.'));
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (candidate && !index.has(candidate)) {
+        index.set(candidate, file.id);
+      }
+    }
+  }
+
+  return index;
+}
+
+function resolveJavaImport(importPath: string, javaPackageIndex: Map<string, string>): string | null {
+  let candidate = importPath;
+  while (candidate.includes('.')) {
+    const resolved = javaPackageIndex.get(candidate);
+    if (resolved) {
+      return resolved;
+    }
+    candidate = candidate.replace(/\.[^.]+$/, '');
+  }
+
+  return javaPackageIndex.get(candidate) ?? null;
+}
+
+function resolveJavaWildcardImport(importPath: string, javaPackageIndex: Map<string, string>): string[] {
+  const prefix = `${importPath.replace(/\.\*$/, '')}.`;
+  const resolved: string[] = [];
+
+  for (const [javaPackage, fileId] of javaPackageIndex.entries()) {
+    if (!javaPackage.startsWith(prefix)) {
+      continue;
+    }
+
+    const rest = javaPackage.slice(prefix.length);
+    if (!rest.includes('.')) {
+      resolved.push(fileId);
+    }
+  }
+
+  return resolved;
+}
+
+function parseJavaDependencies(
+  content: string,
+  fileId: string,
+  javaPackageIndex: Map<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const importRegex = /^\s*import\s+(?:static\s+)?([\w.]+)(\.\*)?\s*;/gm;
+
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(content)) !== null) {
+    const importPath = match[1];
+    const wildcardTargets = match[2] ? resolveJavaWildcardImport(importPath, javaPackageIndex) : [];
+    const targets = match[2] ? wildcardTargets : [resolveJavaImport(importPath, javaPackageIndex)].filter(Boolean);
+
+    for (const targetId of targets) {
+      if (!targetId || targetId === fileId) {
+        continue;
+      }
+
+      deps.push(createDirectDependency(
+        fileId,
+        {
+          targetId,
+          resolvedBy: DependencyResolutionKind.JAVA_PACKAGE,
+        },
+        DependencyType.IMPORT,
+        match[0].replace(/^\s*import\s+/, '').replace(/;\s*$/, '').trim(),
+        DependencyReferenceKind.JAVA_IMPORT
+      ));
+    }
   }
 
   return deps;
@@ -412,15 +896,16 @@ export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[]
   return unique;
 }
 
-export async function parseDependencies(data: CosmosData): Promise<CosmosDependency[]> {
+export async function parseDependencies(data: CosmosData, workspaceRootOverride?: string): Promise<CosmosDependency[]> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
+  if (!workspaceRootOverride && (!workspaceFolders || workspaceFolders.length === 0)) {
     return [];
   }
 
-  const workspaceRoot = workspaceFolders[0].uri.fsPath;
+  const workspaceRoot = workspaceRootOverride ?? workspaceFolders![0].uri.fsPath;
   const settings = await loadResolutionSettings(workspaceRoot);
   const normalizedFileIds = buildNormalizedFileMap(data);
+  const javaPackageIndex = buildJavaPackageIndex(data);
   const allDeps: CosmosDependency[] = [];
 
   for (const fileId of Object.keys(data.files)) {
@@ -440,7 +925,7 @@ export async function parseDependencies(data: CosmosData): Promise<CosmosDepende
           fileDeps = parseWithRegexes(content, fileId, settings, normalizedFileIds);
           break;
         case 'html':
-          fileDeps = parseHtmlDependencies(content, fileId, normalizedFileIds);
+          fileDeps = parseHtmlDependencies(content, fileId, settings, normalizedFileIds);
           break;
         case 'css':
         case 'scss':
@@ -449,6 +934,9 @@ export async function parseDependencies(data: CosmosData): Promise<CosmosDepende
           break;
         case 'py':
           fileDeps = parsePythonDependencies(content, fileId, settings, normalizedFileIds);
+          break;
+        case 'java':
+          fileDeps = parseJavaDependencies(content, fileId, javaPackageIndex);
           break;
       }
 
@@ -650,4 +1138,3 @@ export function computeLayer3Dependencies(directDeps: CosmosDependency[]): Cosmo
   logger.log(`Layer 3 connections: ${layer3.length}`);
   return dedupeDependencies(layer3);
 }
-
