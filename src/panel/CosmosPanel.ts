@@ -1,7 +1,6 @@
 // src/panel/CosmosPanel.ts
 
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { CosmosData } from '../types';
 import { logger } from '../utils/logger';
 
@@ -56,36 +55,19 @@ export class CosmosPanel {
   }
 
   private async openFile(fileId: string): Promise<void> {
-    const workspaceFolders = vscode.workspace.workspaceFolders || [];
-    if (workspaceFolders.length === 0) {
+    const file = this.lastUniverseData?.files[fileId];
+    if (!file) {
+      logger.warn(`Ignoring open request for unknown file: ${fileId}`);
       return;
     }
 
-    let workspaceRoot: string | undefined;
-    let actualFileId = fileId;
-
-    const colonIndex = fileId.indexOf(':');
-    if (colonIndex >= 0) {
-      const namespace = fileId.slice(0, colonIndex);
-      actualFileId = fileId.slice(colonIndex + 1);
-      workspaceRoot = this.lastUniverseData?.workspaceRoots?.[namespace];
-    }
-
-    if (!workspaceRoot) {
-      workspaceRoot = workspaceFolders[0]?.uri.fsPath;
-    }
-
-    if (!workspaceRoot) {
-      return;
-    }
-
-    const fullPath = vscode.Uri.file(path.join(workspaceRoot, actualFileId));
+    const fullPath = vscode.Uri.file(file.path);
     await vscode.window.showTextDocument(fullPath, {
       viewColumn: vscode.ViewColumn.Beside,
       preserveFocus: true,
     });
 
-    logger.log(`Opened file: ${actualFileId}`);
+    logger.log(`Opened file: ${file.relativePath}`);
   }
 
   public static createOrShow(extensionUri: vscode.Uri): CosmosPanel {

@@ -2,7 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { CosmosData, CosmosFile, CosmosFolder, FileType } from '../types';
+import { CosmosData, CosmosFile, CosmosFolder, FileType, StarNode } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
 import { logger } from '../utils/logger';
 import {
@@ -15,74 +15,21 @@ import {
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
-    case 'ts':
-    case 'tsx':
-      return FileType.TS;
-    case 'js':
-    case 'jsx':
-    case 'mjs':
-    case 'cjs':
-      return FileType.JS;
-    case 'html':
-      return FileType.HTML;
-    case 'css':
-    case 'scss':
-    case 'sass':
-      return FileType.CSS;
-    case 'py':
-      return FileType.PY;
-    case 'java':
-      return FileType.JAVA;
-    case 'png':
-    case 'jpg':
-    case 'jpeg':
-    case 'gif':
-    case 'svg':
-    case 'ico':
-    case 'webp':
-    case 'woff':
-    case 'woff2':
-    case 'ttf':
-      return FileType.ASSET;
-    default:
-      return FileType.OTHER;
+    case 'ts': case 'tsx': return FileType.TS;
+    case 'js': case 'jsx': case 'mjs': case 'cjs': return FileType.JS;
+    case 'html': return FileType.HTML;
+    case 'css': case 'scss': case 'sass': return FileType.CSS;
+    case 'py': return FileType.PY;
+    case 'java': return FileType.JAVA;
+    case 'png': case 'jpg': case 'jpeg': case 'gif':
+    case 'svg': case 'ico': case 'webp': case 'woff':
+    case 'woff2': case 'ttf': return FileType.ASSET;
+    default: return FileType.OTHER;
   }
 }
 
-function normalizeRelativeId(workspaceRoot: string, targetPath: string): string {
-  return path.relative(workspaceRoot, targetPath).replace(/\\/g, '/') || '.';
-}
-
-function ensureFolder(
-  data: CosmosData,
-  folderId: string,
-  name: string,
-  folderPath: string,
-  relativePath: string,
-  parentFolderId: string | null,
-  offset?: { x: number; y: number; z: number }
-): CosmosFolder {
-  if (!data.folders[folderId]) {
-    data.folders[folderId] = {
-      id: folderId,
-      name,
-      path: folderPath,
-      relativePath,
-      parentId: parentFolderId,
-      fileIds: [],
-      childFolderIds: [],
-      ...(offset ? { offset } : {}),
-    };
-  }
-
-  if (parentFolderId && data.folders[parentFolderId]) {
-    const parent = data.folders[parentFolderId];
-    if (!parent.childFolderIds.includes(folderId)) {
-      parent.childFolderIds.push(folderId);
-    }
-  }
-
-  return data.folders[folderId];
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/');
 }
 
 async function traverseDirectory(
@@ -93,37 +40,47 @@ async function traverseDirectory(
   parentFolderId: string | null,
   visitedPaths: Set<string> = new Set()
 ): Promise<void> {
-  const currentPath = path.resolve(dirUri.fsPath);
-
-  if (visitedPaths.has(currentPath)) {
-    logger.warn(`Skipping already visited path (possible symlink loop): ${currentPath}`);
+  const realPath = path.resolve(dirUri.fsPath);
+  if (visitedPaths.has(realPath)) {
+    logger.warn(`Skipping symlink loop: ${realPath}`);
     return;
   }
-  visitedPaths.add(currentPath);
+  visitedPaths.add(realPath);
 
   let entries: [string, vscode.FileType][];
   try {
     entries = await vscode.workspace.fs.readDirectory(dirUri);
   } catch (err) {
-    logger.warn(`Unable to read directory ${dirUri.fsPath}: ${err}`);
+    logger.warn(`Cannot read directory ${dirUri.fsPath}: ${err}`);
     return;
   }
 
-  const relativePath = normalizeRelativeId(workspaceRoot, dirUri.fsPath);
+  const relativePath = normalizePath(path.relative(workspaceRoot, dirUri.fsPath)) || '.';
   const folderId = relativePath;
 
-  const currentFolder = ensureFolder(
-    data,
-    folderId,
-    path.basename(dirUri.fsPath) || path.basename(workspaceRoot) || workspaceRoot,
-    dirUri.fsPath,
-    relativePath,
-    parentFolderId
-  );
+  if (!data.folders[folderId]) {
+    const folder: CosmosFolder = {
+      id: folderId,
+      name: path.basename(dirUri.fsPath) || path.basename(workspaceRoot),
+      path: dirUri.fsPath,
+      relativePath,
+      parentId: parentFolderId,
+      fileIds: [],
+      childFolderIds: [],
+    };
+    data.folders[folderId] = folder;
+
+    if (parentFolderId && data.folders[parentFolderId]) {
+      const parent = data.folders[parentFolderId];
+      if (!parent.childFolderIds.includes(folderId)) {
+        parent.childFolderIds.push(folderId);
+      }
+    }
+  }
 
   for (const [name, fileType] of entries) {
     const entryUri = vscode.Uri.joinPath(dirUri, name);
-    const entryRelative = normalizeRelativeId(workspaceRoot, entryUri.fsPath);
+    const entryRelative = normalizePath(path.relative(workspaceRoot, entryUri.fsPath));
 
     if (shouldExclude(entryRelative, exclusions)) {
       logger.log(`Excluding: ${entryRelative}`);
@@ -135,17 +92,13 @@ async function traverseDirectory(
       continue;
     }
 
-    if (fileType !== vscode.FileType.File) {
-      continue;
-    }
+    if (fileType !== vscode.FileType.File) { continue; }
 
     const extension = path.extname(name).replace(/^\./, '');
     let stat: vscode.FileStat;
-
     try {
       stat = await vscode.workspace.fs.stat(entryUri);
-    } catch (err) {
-      logger.warn(`Unable to stat file ${entryRelative}: ${err}`);
+    } catch {
       continue;
     }
 
@@ -161,9 +114,95 @@ async function traverseDirectory(
     };
 
     data.files[entryRelative] = file;
-    currentFolder.fileIds.push(entryRelative);
+    data.folders[folderId].fileIds.push(entryRelative);
     logger.log(`Found file: ${entryRelative}`);
   }
+}
+
+// Calculates orbital radius based on depth
+function getRadiusForDepth(depth: number): number {
+  // Base radius at depth 1 — distance from central sun to top level folders
+  const BASE_RADIUS = 350;
+  // Each level is 55% of the previous
+  const FALLOFF = 0.55;
+  // Minimum so deep folders still have breathing room
+  const MIN_RADIUS = 25;
+
+  return Math.max(MIN_RADIUS, BASE_RADIUS * Math.pow(FALLOFF, depth - 1));
+}
+
+function goldenAngleOffset(
+  index: number,
+  total: number,
+  radius: number,
+  parentPosition: { x: number; y: number; z: number }
+): { x: number; y: number; z: number } {
+  // For single child — place directly above parent, not random
+  if (total === 1) {
+    return {
+      x: parentPosition.x,
+      y: parentPosition.y + radius,
+      z: parentPosition.z,
+    };
+  }
+
+  const phi = Math.acos(1 - (2 * (index + 0.5)) / Math.max(total, 1));
+  const theta = Math.PI * (1 + Math.sqrt(5)) * index;
+  return {
+    x: parentPosition.x + radius * Math.sin(phi) * Math.cos(theta),
+    y: parentPosition.y + radius * Math.sin(phi) * Math.sin(theta),
+    z: parentPosition.z + radius * Math.cos(phi),
+  };
+}
+
+function countSubtreeFiles(
+  folderId: string,
+  folders: Record<string, CosmosFolder>
+): number {
+  const folder = folders[folderId];
+  if (!folder) { return 0; }
+
+  const directFiles = folder.fileIds.length;
+  const childFiles = folder.childFolderIds.reduce(
+    (sum, childId) => sum + countSubtreeFiles(childId, folders),
+    0
+  );
+
+  return directFiles + childFiles;
+}
+export function buildStarTree(
+  folderId: string,
+  folders: Record<string, CosmosFolder>,
+  parentPosition: { x: number; y: number; z: number },
+  depth: number,
+  childIndex: number,
+  totalChildren: number
+): StarNode {
+  const radius = getRadiusForDepth(depth);
+
+  const position = depth === 0
+    ? { x: 0, y: 0, z: 0 }
+    : goldenAngleOffset(childIndex, totalChildren, radius, parentPosition);
+
+  const subtreeFileCount = countSubtreeFiles(folderId, folders);
+
+  const folder = folders[folderId];
+  if (!folder) {
+    return { folderId, position, depth, childNodes: [], subtreeFileCount };
+  }
+
+  const childNodes = folder.childFolderIds.map((childId, i) =>
+    buildStarTree(
+      childId,
+      folders,
+      position,
+      depth + 1,
+      i,
+      folder.childFolderIds.length
+    )
+  );
+
+  return { folderId, position, depth, childNodes, subtreeFileCount };
 }
 
 export async function buildFileTree(
@@ -171,7 +210,7 @@ export async function buildFileTree(
   offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }
 ): Promise<CosmosData> {
   const workspaceRoot = workspaceFolder.uri.fsPath;
-  const workspaceName = workspaceFolder.name || path.basename(workspaceRoot) || 'workspace';
+  const workspaceName = workspaceFolder.name || path.basename(workspaceRoot);
   logger.log(`Building file tree for: ${workspaceRoot}`);
 
   const exclusions = await buildExclusionList(workspaceRoot);
@@ -181,24 +220,31 @@ export async function buildFileTree(
     folders: {},
     dependencies: [],
     rootFolderId: '.',
-    workspaceRoots: {
-      [workspaceName]: workspaceRoot,
-    },
+    workspaceRoots: { [workspaceName]: workspaceRoot },
+    starTree: null,
   };
 
-  ensureFolder(
-    data,
-    '.',
-    path.basename(workspaceRoot) || workspaceName,
+  data.folders['.'] = {
+    id: '.',
+    name: path.basename(workspaceRoot) || workspaceName,
+    path: workspaceRoot,
+    relativePath: '.',
+    parentId: null,
+    fileIds: [],
+    childFolderIds: [],
+    offset,
+  };
+
+  await traverseDirectory(
+    workspaceFolder.uri,
     workspaceRoot,
-    '.',
+    exclusions,
+    data,
     null,
-    offset
+    new Set()
   );
 
-  await traverseDirectory(workspaceFolder.uri, workspaceRoot, exclusions, data, null, new Set());
-
-  logger.log('File tree structural mapping complete. Starting dependency resolution pass...');
+  logger.log('File tree complete. Parsing dependencies...');
   const directDeps = await parseDependencies(data, workspaceRoot);
   const indirectDeps = computeIndirectDependencies(directDeps);
   const circularDeps = detectCircularDependencies(directDeps);
@@ -214,9 +260,11 @@ export async function buildFileTree(
   logger.log(
     `Direct: ${directDeps.length}, Indirect: ${indirectDeps.length}, Circular: ${circularDeps.length}, Layer3: ${layer3Deps.length}, Total: ${data.dependencies.length}`
   );
-  logger.log(
-    `File tree built: ${Object.keys(data.files).length} files, ${Object.keys(data.folders).length} folders, ${data.dependencies.length} connections mapped.`
-  );
+
+  data.starTree = buildStarTree('.', data.folders, { x: 0, y: 0, z: 0 }, 0, 0, 1);
+  logger.log('Star tree built');
 
   return data;
 }
+
+

@@ -9,7 +9,7 @@ export class Star {
   public folder: CosmosFolder;
   public light: THREE.PointLight;
 
-  constructor(folder: CosmosFolder, position: THREE.Vector3) {
+  constructor(folder: CosmosFolder, position: THREE.Vector3, subtreeFileCount: number = 0) {
     this.folder = folder;
     this.position = position;
 
@@ -17,7 +17,7 @@ export class Star {
     const baseSize = 6;
     const multiplier = 0.4;
 
-    const size = Math.max(minSize, baseSize + folder.fileIds.length * multiplier);
+    const size = Math.max(3, 4 + Math.sqrt(subtreeFileCount) * 0.8);
 
     const geometry = new THREE.SphereGeometry(size, 16, 16);
     const color = 0xfff4cc;

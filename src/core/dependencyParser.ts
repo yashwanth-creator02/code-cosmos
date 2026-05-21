@@ -79,6 +79,21 @@ const HTML_REFERENCE_ATTRIBUTES = [
   'xlink:href',
 ];
 
+const PARSEABLE_DEPENDENCY_EXTENSIONS = new Set([
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'html',
+  'css',
+  'scss',
+  'sass',
+  'py',
+  'java',
+]);
+
 function normalizePath(value: string): string {
   return value
     .replace(/\\/g, '/')
@@ -910,12 +925,17 @@ export async function parseDependencies(data: CosmosData, workspaceRootOverride?
 
   for (const fileId of Object.keys(data.files)) {
     const file = data.files[fileId];
+    const extension = file.extension.toLowerCase();
+
+    if (!PARSEABLE_DEPENDENCY_EXTENSIONS.has(extension)) {
+      continue;
+    }
 
     try {
       const content = await readFileContent(file.path);
       let fileDeps: CosmosDependency[] = [];
 
-      switch (file.extension.toLowerCase()) {
+      switch (extension) {
         case 'ts':
         case 'tsx':
         case 'js':

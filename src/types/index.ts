@@ -82,10 +82,19 @@ export interface CosmosDependency {
   referenceKind?: DependencyReferenceKind;
 }
 
+export interface StarNode {
+  folderId: string;
+  position: { x: number; y: number; z: number };
+  depth: number;
+  childNodes: StarNode[];
+  subtreeFileCount: number;
+}
+
 export interface CosmosData {
   files: Record<string, CosmosFile>;
   folders: Record<string, CosmosFolder>;
   dependencies: CosmosDependency[];
   rootFolderId: string;
   workspaceRoots: Record<string, string>;
+  starTree: StarNode | null;
 }

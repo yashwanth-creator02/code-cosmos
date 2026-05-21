@@ -4,7 +4,15 @@ import * as vscode from 'vscode';
 import { initLogger, logger } from './utils/logger';
 import { buildFileTree } from './core/fileTree';
 import { CosmosPanel } from './panel/CosmosPanel';
-import { CosmosData } from './types';
+import { CosmosData, StarNode } from './types';
+
+function prefixStarTree(node: StarNode, prefix: string): StarNode {
+  return {
+    ...node,
+    folderId: prefix + node.folderId,
+    childNodes: node.childNodes.map(child => prefixStarTree(child, prefix)),
+  };
+}
 
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context);
@@ -33,6 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
           dependencies: [],
           rootFolderId: '.',
           workspaceRoots: {},
+          starTree: null,
         };
 
         for (let i = 0; i < workspaceFolders.length; i++) {
@@ -44,12 +53,15 @@ export function activate(context: vscode.ExtensionContext) {
           };
 
           const data = await buildFileTree(folder, offset);
+
+          // Use workspace name as prefix — NO double prefix
+          // workspace name = "myapp", prefix = "myapp:"
+          // workspaceRoots key = "myapp" (not "myapp:myapp")
           const prefix = `${folder.name}:`;
 
-          if (data.workspaceRoots) {
-            for (const [name, root] of Object.entries(data.workspaceRoots)) {
-              allData.workspaceRoots[`${prefix}${name}`] = root;
-            }
+          // Merge workspace roots — key is just the workspace name
+          for (const [name, root] of Object.entries(data.workspaceRoots)) {
+            allData.workspaceRoots[name] = root;
           }
 
           for (const [id, file] of Object.entries(data.files)) {
@@ -65,56 +77,55 @@ export function activate(context: vscode.ExtensionContext) {
               ...folderData,
               id: prefix + id,
               parentId: folderData.parentId ? prefix + folderData.parentId : null,
-              fileIds: folderData.fileIds.map((fid) => prefix + fid),
-              childFolderIds: folderData.childFolderIds.map((cid) => prefix + cid),
+              fileIds: folderData.fileIds.map(fid => prefix + fid),
+              childFolderIds: folderData.childFolderIds.map(cid => prefix + cid),
             };
           }
 
           allData.dependencies.push(
-            ...data.dependencies.map((dep) => ({
+            ...data.dependencies.map(dep => ({
               ...dep,
               sourceId: prefix + dep.sourceId,
               targetId: prefix + dep.targetId,
             }))
           );
 
-          if (i === 0) {
+          if (i === 0 && data.starTree) {
+            allData.starTree = prefixStarTree(data.starTree, prefix);
             allData.rootFolderId = prefix + '.';
           }
         }
 
         const fileCount = Object.keys(allData.files).length;
         const folderCount = Object.keys(allData.folders).length;
-        const LARGE_REPO_THRESHOLD = 500;
-        const VERY_LARGE_REPO_THRESHOLD = 1000;
 
         logger.log(`Scan complete: ${fileCount} files, ${folderCount} folders`);
 
         if (fileCount === 0) {
           vscode.window.showWarningMessage(
-            'Code Cosmos: No files found in this workspace. Check your .cosmosignore or try opening a different folder.'
+            'Code Cosmos: No files found. Check your .cosmosignore or open a different folder.'
           );
           return;
         }
 
+        const VERY_LARGE_REPO_THRESHOLD = 1000;
+        const LARGE_REPO_THRESHOLD = 500;
+
         if (fileCount > VERY_LARGE_REPO_THRESHOLD) {
           const choice = await vscode.window.showWarningMessage(
             `Code Cosmos: This repo has ${fileCount} files. Rendering may be slow. Continue?`,
-            'Continue',
-            'Cancel'
+            'Continue', 'Cancel'
           );
-          if (choice !== 'Continue') {
-            return;
-          }
+          if (choice !== 'Continue') { return; }
         } else if (fileCount > LARGE_REPO_THRESHOLD) {
           vscode.window.showInformationMessage(
-            `Code Cosmos: Large repo detected (${fileCount} files). Performance mode recommended — consider adding folders to .cosmosignore.`
+            `Code Cosmos: Large repo (${fileCount} files). Consider adding folders to .cosmosignore.`
           );
         }
 
         if (fileCount < 3) {
           vscode.window.showInformationMessage(
-            `Code Cosmos: Only ${fileCount} file(s) found. The universe may look sparse — this works best with larger projects.`
+            `Code Cosmos: Only ${fileCount} file(s) found. Works best with larger projects.`
           );
         }
 
