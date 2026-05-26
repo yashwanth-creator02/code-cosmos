@@ -98,3 +98,31 @@ export interface CosmosData {
   workspaceRoots: Record<string, string>;
   starTree: StarNode | null;
 }
+
+export interface SettingsState {
+  showDirectLines: boolean;
+  showIndirectLines: boolean;
+  showLayer3Lines: boolean;
+  showCircularLines: boolean;
+  enableAnimation: boolean;
+  orbitalSpeed: number;
+  showFolderLabels: boolean;
+  showProximityLabels: boolean;
+  showBackgroundStars: boolean;
+  enableFog: boolean;
+  showLegend: boolean;
+}
+
+export const DEFAULT_SETTINGS: SettingsState = {
+  showDirectLines: true,
+  showIndirectLines: false,
+  showLayer3Lines: false,
+  showCircularLines: true,
+  enableAnimation: false,
+  orbitalSpeed: 1.0,
+  showFolderLabels: true,
+  showProximityLabels: true,
+  showBackgroundStars: true,
+  enableFog: true,
+  showLegend: true,
+};

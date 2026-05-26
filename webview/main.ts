@@ -9,6 +9,10 @@ let universe: Universe | null = null;
 // Set up message listener FIRST — before signaling ready
 // so we never miss a LOAD_UNIVERSE message
 onMessageFromExtension((message: any) => {
+  if (message.type === 'APPLY_SETTINGS' && universe) {
+    universe.applySettings(message.payload);
+    return;
+  }
   if (message.type === 'LOAD_UNIVERSE') {
     const loadingText = document.getElementById('loading-text');
     if (loadingText) {

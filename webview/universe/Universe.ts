@@ -12,8 +12,32 @@ import {
   DependencyLayer,
   DependencyType,
   CosmosData,
-  StarNode,
+  StarNode, SettingsState, DEFAULT_SETTINGS
 } from '../../src/types';
+
+const PRESETS = {
+  clean: {
+    showDirectLines: true, showIndirectLines: false,
+    showLayer3Lines: false, showCircularLines: true,
+    enableAnimation: false, orbitalSpeed: 1.0,
+    showFolderLabels: true, showProximityLabels: true,
+    showBackgroundStars: true, enableFog: true, showLegend: true,
+  },
+  full: {
+    showDirectLines: true, showIndirectLines: true,
+    showLayer3Lines: true, showCircularLines: true,
+    enableAnimation: true, orbitalSpeed: 1.0,
+    showFolderLabels: true, showProximityLabels: true,
+    showBackgroundStars: true, enableFog: true, showLegend: true,
+  },
+  performance: {
+    showDirectLines: true, showIndirectLines: false,
+    showLayer3Lines: false, showCircularLines: true,
+    enableAnimation: false, orbitalSpeed: 1.0,
+    showFolderLabels: false, showProximityLabels: false,
+    showBackgroundStars: false, enableFog: false, showLegend: true,
+  },
+};
 
 export class Universe {
   private scene: THREE.Scene;
@@ -46,6 +70,9 @@ export class Universe {
   private planetLabels: Map<string, THREE.Sprite> = new Map();
   private readonly LABEL_SHOW_DISTANCE = 150;
   private lastMouseMoveTime = 0;
+  private settings: SettingsState = { ...DEFAULT_SETTINGS };
+  private backgroundStars: THREE.Points | null = null;
+
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -101,6 +128,7 @@ export class Universe {
     this.initSearch();
     this.initResetButton();
     this.initHelpButton();
+    this.initSettingsPanel();
     this.addBackgroundStars();
     this.animate();
   }
@@ -623,16 +651,26 @@ export class Universe {
           input.focus();
         }
       }
+
       if (e.key === 'Escape') {
         container.style.display = 'none';
         const sp = document.getElementById('shortcuts-panel');
         if (sp) { sp.style.display = 'none'; }
         this.exitFocusMode();
       }
+
       if (e.key === 'r' || e.key === 'R') { this.resetCamera(); }
+
       if (e.key === '?') {
         const panel = document.getElementById('shortcuts-panel')!;
         panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+      }
+
+      if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey) {
+          const sp = document.getElementById('settings-panel')!;
+          sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
+        }
       }
     });
 
@@ -749,7 +787,9 @@ export class Universe {
     const material = new THREE.PointsMaterial({
       color: 0xffffff, size: 1.5, transparent: true, opacity: 0.6,
     });
-    this.scene.add(new THREE.Points(geometry, material));
+    const stars = new THREE.Points(geometry, material);
+    this.backgroundStars = stars;
+    this.scene.add(stars);
   }
 
   private addCentralBody(rootFolder: CosmosFolder | undefined): void {
@@ -915,33 +955,62 @@ export class Universe {
 
   private animate(): void {
     requestAnimationFrame(() => this.animate());
+
     this.updateSpacecraft();
 
-    if (!this.spacecraftMode) { this.controls.update(); }
-
-    if (this.centralCore) {
-      this.centralCore.rotation.y += 0.0005;
-      this.centralCore.rotation.x += 0.0002;
+    if (!this.spacecraftMode) {
+      this.controls.update();
     }
 
-    this.stars.forEach(star => { star.mesh.rotation.y += 0.0005; });
+    // Orbital animation — only if enabled
+    if (this.settings.enableAnimation) {
 
-    this.orbitalData.forEach((orbital, fileId) => {
-      const planet = this.planets.get(fileId);
-      if (!planet) { return; }
+      if (this.centralCore) {
+        this.centralCore.rotation.y += 0.0005;
+        this.centralCore.rotation.x += 0.0002;
+      }
 
-      orbital.angle += orbital.speed;
-      planet.mesh.position.x = orbital.starPosition.x +
-        orbital.radius * Math.sin(orbital.inclination) * Math.cos(orbital.angle);
-      planet.mesh.position.y = orbital.starPosition.y +
-        orbital.radius * Math.cos(orbital.inclination);
-      planet.mesh.position.z = orbital.starPosition.z +
-        orbital.radius * Math.sin(orbital.inclination) * Math.sin(orbital.angle);
-      planet.mesh.rotation.y += 0.002;
-    });
+      this.stars.forEach(star => {
+        star.mesh.rotation.y += 0.0005;
+      });
 
-    this.updateDependencyLines();
-    this.updateProximityLabels();
+      this.orbitalData.forEach((orbital, fileId) => {
+        const planet = this.planets.get(fileId);
+
+        if (!planet) {
+          return;
+        }
+
+        orbital.angle += orbital.speed * this.settings.orbitalSpeed;
+
+        planet.mesh.position.x =
+          orbital.starPosition.x +
+          orbital.radius *
+          Math.sin(orbital.inclination) *
+          Math.cos(orbital.angle);
+
+        planet.mesh.position.y =
+          orbital.starPosition.y +
+          orbital.radius *
+          Math.cos(orbital.inclination);
+
+        planet.mesh.position.z =
+          orbital.starPosition.z +
+          orbital.radius *
+          Math.sin(orbital.inclination) *
+          Math.sin(orbital.angle);
+
+        planet.mesh.rotation.y += 0.002;
+      });
+
+      this.updateDependencyLines();
+    }
+
+    // Proximity labels — only if enabled
+    if (this.settings.showProximityLabels) {
+      this.updateProximityLabels();
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1027,4 +1096,150 @@ export class Universe {
     sprite.scale.set(50, 12, 1);
     return sprite;
   }
+
+  public applySettings(settings: SettingsState): void {
+    this.settings = settings;
+    this.applySettingsToScene();
+  }
+
+  private applySettingsToScene(): void {
+    // Fog
+    this.scene.fog = this.settings.enableFog
+      ? new THREE.FogExp2(0x000000, 0.00006)
+      : null;
+
+    // Background stars
+    if (this.backgroundStars) {
+      this.backgroundStars.visible = this.settings.showBackgroundStars;
+    }
+
+    // Folder labels
+    this.starLabels.forEach(label => {
+      label.visible = this.settings.showFolderLabels;
+    });
+
+    // Legend
+    const legend = document.getElementById('legend');
+    if (legend) {
+      legend.style.display = this.settings.showLegend ? 'block' : 'none';
+    }
+
+    // Dependency lines
+    this.lines.forEach(depLine => {
+      const layer = depLine.dependency.layer;
+      let visible = true;
+
+      if (layer === DependencyLayer.DIRECT && !this.settings.showDirectLines) {
+        visible = false;
+      }
+      if (layer === DependencyLayer.INDIRECT && !this.settings.showIndirectLines) {
+        visible = false;
+      }
+      if (
+        (layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
+          layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY) &&
+        !this.settings.showLayer3Lines
+      ) {
+        visible = false;
+      }
+      if (layer === DependencyLayer.CIRCULAR && !this.settings.showCircularLines) {
+        visible = false;
+      }
+
+      depLine.line.visible = visible;
+    });
+  }
+
+  private initSettingsPanel(): void {
+    const panel = document.getElementById('settings-panel')!;
+    const btn = document.getElementById('settings-btn')!;
+
+    // Toggle panel
+    btn.addEventListener('click', () => {
+      panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+    });
+
+    // Helper to sync checkbox to setting and save
+    const bindCheckbox = (id: string, key: keyof SettingsState) => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      if (!el) { return; }
+
+      // Set initial state
+      el.checked = this.settings[key] as boolean;
+
+      el.addEventListener('change', () => {
+        (this.settings as any)[key] = el.checked;
+        this.applySettingsToScene();
+        this.saveSettings();
+      });
+    };
+
+    // Helper to sync slider
+    const bindSlider = (id: string, key: keyof SettingsState) => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      if (!el) { return; }
+
+      el.value = String(this.settings[key]);
+
+      el.addEventListener('input', () => {
+        (this.settings as any)[key] = parseFloat(el.value);
+        this.saveSettings();
+      });
+    };
+
+    bindCheckbox('s-direct', 'showDirectLines');
+    bindCheckbox('s-indirect', 'showIndirectLines');
+    bindCheckbox('s-layer3', 'showLayer3Lines');
+    bindCheckbox('s-circular', 'showCircularLines');
+    bindCheckbox('s-animation', 'enableAnimation');
+    bindCheckbox('s-folder-labels', 'showFolderLabels');
+    bindCheckbox('s-proximity-labels', 'showProximityLabels');
+    bindCheckbox('s-bg-stars', 'showBackgroundStars');
+    bindCheckbox('s-fog', 'enableFog');
+    bindCheckbox('s-legend', 'showLegend');
+    bindSlider('s-speed', 'orbitalSpeed');
+
+    // Preset buttons
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = (btn as HTMLElement).dataset.preset as keyof typeof PRESETS;
+        this.applyPreset(preset);
+        this.syncPanelToSettings();
+      });
+    });
+  }
+
+  private applyPreset(preset: keyof typeof PRESETS): void {
+    this.settings = { ...PRESETS[preset] };
+    this.applySettingsToScene();
+    this.saveSettings();
+  }
+
+  private syncPanelToSettings(): void {
+    const set = (id: string, val: boolean) => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      if (el) { el.checked = val; }
+    };
+    const setVal = (id: string, val: number) => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      if (el) { el.value = String(val); }
+    };
+
+    set('s-direct', this.settings.showDirectLines);
+    set('s-indirect', this.settings.showIndirectLines);
+    set('s-layer3', this.settings.showLayer3Lines);
+    set('s-circular', this.settings.showCircularLines);
+    set('s-animation', this.settings.enableAnimation);
+    set('s-folder-labels', this.settings.showFolderLabels);
+    set('s-proximity-labels', this.settings.showProximityLabels);
+    set('s-bg-stars', this.settings.showBackgroundStars);
+    set('s-fog', this.settings.enableFog);
+    set('s-legend', this.settings.showLegend);
+    setVal('s-speed', this.settings.orbitalSpeed);
+  }
+
+  private saveSettings(): void {
+    sendToExtension({ type: 'SAVE_SETTINGS', payload: this.settings });
+  }
+
 }

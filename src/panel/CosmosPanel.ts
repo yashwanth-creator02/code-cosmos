@@ -1,28 +1,36 @@
 // src/panel/CosmosPanel.ts
 
 import * as vscode from 'vscode';
-import { CosmosData } from '../types';
+import { CosmosData, SettingsState, DEFAULT_SETTINGS } from '../types';
 import { logger } from '../utils/logger';
 
 type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
 
 type MessageFromWebview =
   | { type: 'READY' }
-  | { type: 'OPEN_FILE'; payload: { fileId: string } };
+  | { type: 'OPEN_FILE'; payload: { fileId: string } }
+  | { type: 'SAVE_SETTINGS'; payload: SettingsState };
 
 export class CosmosPanel {
   private static instance: CosmosPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
+  private readonly context: vscode.ExtensionContext;
   private lastLoadMessage: LoadUniverseMessage | null = null;
   private lastUniverseData: CosmosData | null = null;
   private isReady = false;
   private pendingMessage: LoadUniverseMessage | null = null;
+  private pendingSettings: SettingsState | null = null;
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+  private constructor(
+    panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
+    context: vscode.ExtensionContext
+  ) {
     this.panel = panel;
     this.extensionUri = extensionUri;
+    this.context = context;
 
     this.panel.webview.html = this.getHtmlContent();
     this.panel.onDidDispose(() => this.dispose());
@@ -37,19 +45,38 @@ export class CosmosPanel {
     this.panel.webview.onDidReceiveMessage(async (message: MessageFromWebview) => {
       logger.log('Message received from webview', message.type);
 
-      if (message.type === 'READY') {
-        this.isReady = true;
-        if (this.pendingMessage) {
-          this.panel.webview.postMessage(this.pendingMessage);
-          this.lastLoadMessage = this.pendingMessage;
-          this.lastUniverseData = this.pendingMessage.payload;
-          this.pendingMessage = null;
-        }
-        return;
-      }
+      switch (message.type) {
+        case 'READY':
+          this.isReady = true;
+          logger.log('Webview is ready');
 
-      if (message.type === 'OPEN_FILE') {
-        await this.openFile(message.payload.fileId);
+          // Send pending settings first, then pending universe data
+          if (this.pendingSettings) {
+            this.panel.webview.postMessage({
+              type: 'APPLY_SETTINGS',
+              payload: this.pendingSettings,
+            });
+            this.pendingSettings = null;
+            logger.log('Sent pending settings');
+          }
+
+          if (this.pendingMessage) {
+            this.panel.webview.postMessage(this.pendingMessage);
+            this.lastLoadMessage = this.pendingMessage;
+            this.lastUniverseData = this.pendingMessage.payload;
+            this.pendingMessage = null;
+            logger.log('Sent pending LOAD_UNIVERSE');
+          }
+          break;
+
+        case 'OPEN_FILE':
+          await this.openFile(message.payload.fileId);
+          break;
+
+        case 'SAVE_SETTINGS':
+          await this.context.globalState.update('cosmosSettings', message.payload);
+          logger.log('Settings saved');
+          break;
       }
     });
   }
@@ -70,7 +97,10 @@ export class CosmosPanel {
     logger.log(`Opened file: ${file.relativePath}`);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri): CosmosPanel {
+  public static createOrShow(
+    extensionUri: vscode.Uri,
+    context: vscode.ExtensionContext
+  ): CosmosPanel {
     if (CosmosPanel.instance) {
       CosmosPanel.instance.panel.reveal();
       logger.log('CosmosPanel already exists, revealing');
@@ -89,7 +119,7 @@ export class CosmosPanel {
     );
 
     logger.log('CosmosPanel created');
-    CosmosPanel.instance = new CosmosPanel(panel, extensionUri);
+    CosmosPanel.instance = new CosmosPanel(panel, extensionUri, context);
     return CosmosPanel.instance;
   }
 
@@ -100,8 +130,10 @@ export class CosmosPanel {
 
       if (this.isReady) {
         this.panel.webview.postMessage(message);
+        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (immediate)');
       } else {
         this.pendingMessage = message;
+        logger.log('CosmosPanel.sendMessage LOAD_UNIVERSE (queued)');
       }
       return;
     }
@@ -109,8 +141,26 @@ export class CosmosPanel {
     this.panel.webview.postMessage(message);
   }
 
+  public getSavedSettings(): SettingsState {
+    return this.context.globalState.get<SettingsState>(
+      'cosmosSettings',
+      DEFAULT_SETTINGS
+    );
+  }
+
+  public sendSettings(settings: SettingsState): void {
+    if (this.isReady) {
+      this.panel.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
+      logger.log('Settings sent to webview immediately');
+    } else {
+      this.pendingSettings = settings;
+      logger.log('Settings queued — waiting for READY');
+    }
+  }
+
   private dispose(): void {
     CosmosPanel.instance = undefined;
+    logger.log('CosmosPanel disposed');
   }
 
   private getHtmlContent(): string {
@@ -144,6 +194,7 @@ export class CosmosPanel {
         <body>
           <canvas id="cosmos-canvas" style="width:100%;height:100%;display:block;"></canvas>
 
+          <!-- Loading overlay -->
           <div id="loading-overlay" style="
             position: fixed;
             top: 0; left: 0;
@@ -177,6 +228,7 @@ export class CosmosPanel {
             }
           </style>
 
+          <!-- Tooltip -->
           <div id="tooltip" style="
             position: fixed;
             display: none;
@@ -192,6 +244,7 @@ export class CosmosPanel {
             line-height: 1.6;
           "></div>
 
+          <!-- Search -->
           <div id="search-container" style="
             position: fixed;
             top: 16px;
@@ -222,6 +275,7 @@ export class CosmosPanel {
             "></div>
           </div>
 
+          <!-- Reset button -->
           <button id="reset-camera" style="
             position: fixed;
             bottom: 20px;
@@ -237,43 +291,181 @@ export class CosmosPanel {
             z-index: 100;
           ">⟳ Reset View</button>
 
+          <!-- Settings button -->
+          <button id="settings-btn" style="
+            position: fixed;
+            bottom: 20px;
+            right: 130px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">⚙</button>
+
+          <!-- Help button -->
           <button id="help-button" style="
+            position: fixed;
+            bottom: 20px;
+            right: 170px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-family: sans-serif;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">?</button>
+
+          <!-- Mode indicator -->
+          <div id="mode-indicator" style="
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-family: sans-serif;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 100;
+          "></div>
+
+          <!-- Legend -->
+          <div id="legend" style="
             position: fixed;
             bottom: 20px;
             left: 20px;
             background: rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-family: sans-serif;
-            font-size: 12px;
-            cursor: pointer;
-            z-index: 100;
-          ">? Help</button>
-
-          <div id="shortcuts-panel" style="
-            position: fixed;
-            bottom: 60px;
-            left: 20px;
-            background: rgba(0,0,0,0.9);
-            color: white;
             border: 1px solid rgba(255,255,255,0.15);
-            padding: 12px 14px;
+            color: white;
+            padding: 12px 16px;
             border-radius: 8px;
             font-family: sans-serif;
-            font-size: 12px;
-            line-height: 1.7;
-            display: none;
+            font-size: 11px;
             z-index: 100;
+            line-height: 1.8;
           ">
-            <strong>Shortcuts</strong><br>
-            / or Ctrl+F: Search<br>
-            R: Reset view<br>
-            Esc: Exit focus / close panels
+            <div style="font-weight:bold;margin-bottom:6px;opacity:0.6;font-size:10px;letter-spacing:1px;">DEPENDENCIES</div>
+            <div><span style="color:#ffffff">⬤</span> Direct import</div>
+            <div><span style="color:#4488ff">⬤</span> Indirect chain</div>
+            <div><span style="color:#FFB300">⬤</span> Shared dependent</div>
+            <div><span style="color:#00BCD4">⬤</span> Shared dependency</div>
+            <div><span style="color:#FF1744">⬤</span> Circular — danger</div>
+            <div style="margin-top:8px;font-weight:bold;opacity:0.6;font-size:10px;letter-spacing:1px;">OBJECTS</div>
+            <div>⭐ Central sun — repository root</div>
+            <div>🔆 Star — folder</div>
+            <div>⬤ Planet — file</div>
           </div>
 
-          <script type="module" src="${scriptUri}"></script>
+          <!-- Settings Panel -->
+          <div id="settings-panel" style="
+            position: fixed;
+            top: 50%;
+            right: 20px;
+            transform: translateY(-50%);
+            background: rgba(0,0,0,0.92);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: white;
+            padding: 16px;
+            border-radius: 10px;
+            font-family: sans-serif;
+            font-size: 12px;
+            z-index: 200;
+            display: none;
+            width: 220px;
+            line-height: 2;
+          ">
+            <div style="font-weight:bold;font-size:14px;margin-bottom:12px;">⚙ Settings</div>
+
+            <div style="margin-bottom:12px;">
+              <div style="opacity:0.6;font-size:10px;letter-spacing:1px;margin-bottom:6px;">PRESETS</div>
+              <div style="display:flex;gap:6px;">
+                <button class="preset-btn" data-preset="clean" style="
+                  flex:1;padding:4px;background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);color:white;
+                  border-radius:4px;cursor:pointer;font-size:11px;">Clean</button>
+                <button class="preset-btn" data-preset="full" style="
+                  flex:1;padding:4px;background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);color:white;
+                  border-radius:4px;cursor:pointer;font-size:11px;">Full</button>
+                <button class="preset-btn" data-preset="performance" style="
+                  flex:1;padding:4px;background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);color:white;
+                  border-radius:4px;cursor:pointer;font-size:11px;">Perf</button>
+              </div>
+            </div>
+
+            <div style="opacity:0.6;font-size:10px;letter-spacing:1px;margin-bottom:4px;">DEPENDENCIES</div>
+            <label><input type="checkbox" id="s-direct" checked> <span style="color:#ffffff">⬤</span> Direct</label><br>
+            <label><input type="checkbox" id="s-indirect"> <span style="color:#4488ff">⬤</span> Indirect</label><br>
+            <label><input type="checkbox" id="s-layer3"> <span style="color:#FFB300">⬤</span> Shared</label><br>
+            <label><input type="checkbox" id="s-circular" checked> <span style="color:#FF1744">⬤</span> Circular</label><br>
+
+            <div style="opacity:0.6;font-size:10px;letter-spacing:1px;margin-top:10px;margin-bottom:4px;">ANIMATION</div>
+            <label><input type="checkbox" id="s-animation"> Orbital animation</label><br>
+            <div style="margin-top:6px;">
+              <span style="opacity:0.7">Speed:</span>
+              <input type="range" id="s-speed" min="0.1" max="3" step="0.1" value="1"
+                style="width:100%;margin-top:4px;">
+            </div>
+
+            <div style="opacity:0.6;font-size:10px;letter-spacing:1px;margin-top:10px;margin-bottom:4px;">LABELS</div>
+            <label><input type="checkbox" id="s-folder-labels" checked> Folder names</label><br>
+            <label><input type="checkbox" id="s-proximity-labels" checked> File names (proximity)</label><br>
+
+            <div style="opacity:0.6;font-size:10px;letter-spacing:1px;margin-top:10px;margin-bottom:4px;">VISUALS</div>
+            <label><input type="checkbox" id="s-bg-stars" checked> Background stars</label><br>
+            <label><input type="checkbox" id="s-fog" checked> Depth fog</label><br>
+            <label><input type="checkbox" id="s-legend" checked> Legend</label><br>
+          </div>
+
+          <!-- Keyboard shortcuts panel -->
+          <div id="shortcuts-panel" style="
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.92);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 24px 32px;
+            border-radius: 12px;
+            font-family: sans-serif;
+            font-size: 13px;
+            z-index: 200;
+            display: none;
+            min-width: 320px;
+            line-height: 2;
+          ">
+            <div style="font-weight:bold;font-size:16px;margin-bottom:16px;">⌨ Keyboard Shortcuts</div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;">
+              <kbd style="opacity:0.6">/ or Ctrl+F</kbd><span>Search files</span>
+              <kbd style="opacity:0.6">R</kbd><span>Reset camera view</span>
+              <kbd style="opacity:0.6">F</kbd><span>Toggle spacecraft mode</span>
+              <kbd style="opacity:0.6">S</kbd><span>Toggle settings</span>
+              <kbd style="opacity:0.6">W A S D</kbd><span>Fly in spacecraft mode</span>
+              <kbd style="opacity:0.6">Q / E</kbd><span>Fly up / down</span>
+              <kbd style="opacity:0.6">Shift</kbd><span>Speed boost in spacecraft</span>
+              <kbd style="opacity:0.6">Click planet</kbd><span>Open file + focus mode</span>
+              <kbd style="opacity:0.6">Click again</kbd><span>Exit focus mode</span>
+              <kbd style="opacity:0.6">Escape</kbd><span>Exit focus / search / panels</span>
+              <kbd style="opacity:0.6">?</kbd><span>Toggle this panel</span>
+            </div>
+            <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
+          </div>
+
+          <script src="${scriptUri}"></script>
         </body>
       </html>
     `;

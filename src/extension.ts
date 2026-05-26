@@ -129,9 +129,11 @@ export function activate(context: vscode.ExtensionContext) {
           );
         }
 
-        const panel = CosmosPanel.createOrShow(context.extensionUri);
-        panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
+        const panel = CosmosPanel.createOrShow(context.extensionUri, context);
+        const savedSettings = panel.getSavedSettings();
+        panel.sendSettings(savedSettings);
 
+        panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
         vscode.window.showInformationMessage(
           `Code Cosmos: Found ${fileCount} files across ${folderCount} folders`
         );
