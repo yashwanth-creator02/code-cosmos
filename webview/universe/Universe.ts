@@ -72,6 +72,8 @@ export class Universe {
   private lastMouseMoveTime = 0;
   private settings: SettingsState = { ...DEFAULT_SETTINGS };
   private backgroundStars: THREE.Points | null = null;
+  private focusedStarId: string | null = null;
+
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -123,11 +125,18 @@ export class Universe {
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { this.exitFocusMode(); }
     });
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        this.exitFocusMode();
+        this.exitStarFocusMode();
+      }
+    });
 
     this.initSpacecraftMode();
     this.initSearch();
     this.initResetButton();
     this.initHelpButton();
+    this.initRefreshButton();
     this.initSettingsPanel();
     this.addBackgroundStars();
     this.animate();
@@ -389,12 +398,17 @@ export class Universe {
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
-    const intersects = this.raycaster.intersectObjects(planetMeshes);
 
-    if (intersects.length > 0) {
-      const clicked = intersects[0].object;
+    // Check planets first
+    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
+    const planetIntersects = this.raycaster.intersectObjects(planetMeshes);
+
+    if (planetIntersects.length > 0) {
+      const clicked = planetIntersects[0].object;
       const fileId = clicked.userData.id as string;
+
+      // Exit star focus first if active
+      if (this.focusedStarId) { this.exitStarFocusMode(); }
 
       if (this.focusedFileId === fileId) {
         this.exitFocusMode();
@@ -402,9 +416,31 @@ export class Universe {
         this.enterFocusMode(fileId);
         sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
       }
-    } else {
-      this.exitFocusMode();
+      return;
     }
+
+    // Check stars
+    const starMeshes = Array.from(this.stars.values()).map(s => s.mesh);
+    const starIntersects = this.raycaster.intersectObjects(starMeshes);
+
+    if (starIntersects.length > 0) {
+      const clicked = starIntersects[0].object;
+      const folderId = clicked.userData.id as string;
+
+      // Exit planet focus first if active
+      if (this.focusedFileId) { this.exitFocusMode(); }
+
+      if (this.focusedStarId === folderId) {
+        this.exitStarFocusMode();
+      } else {
+        this.enterStarFocusMode(folderId);
+      }
+      return;
+    }
+
+    // Clicked empty space — exit everything
+    this.exitFocusMode();
+    this.exitStarFocusMode();
   }
 
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
@@ -672,6 +708,11 @@ export class Universe {
           sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
         }
       }
+
+      if ((e.ctrlKey && (e.key === 'u' || e.key === 'U')) || e.key === 'F5') {
+        e.preventDefault();
+        sendToExtension({ type: 'REFRESH' });
+      }
     });
 
     input.addEventListener('input', () => {
@@ -727,6 +768,36 @@ export class Universe {
         this.controls.target.copy(target);
         this.controls.update();
         this.enterFocusMode(fileId);
+        return;
+      }
+      progress++;
+      const t = progress / duration;
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      this.camera.position.lerpVectors(startPosition, endPosition, eased);
+      this.controls.target.lerpVectors(startTarget, target, eased);
+      this.controls.update();
+      requestAnimationFrame(fly);
+    };
+
+    fly();
+  }
+
+  private flyToStar(folderId: string): void {
+    const star = this.stars.get(folderId);
+    if (!star) { return; }
+
+    const target = star.mesh.position.clone();
+    const startPosition = this.camera.position.clone();
+    const startTarget = this.controls.target.clone();
+    const endPosition = target.clone().add(new THREE.Vector3(0, 0, 250));
+
+    let progress = 0;
+    const duration = 60;
+
+    const fly = () => {
+      if (progress >= duration) {
+        this.controls.target.copy(target);
+        this.controls.update();
         return;
       }
       progress++;
@@ -1240,6 +1311,104 @@ export class Universe {
 
   private saveSettings(): void {
     sendToExtension({ type: 'SAVE_SETTINGS', payload: this.settings });
+  }
+
+  private enterStarFocusMode(folderId: string): void {
+    this.focusedStarId = folderId;
+    this.flyToStar(folderId);
+    const folder = this.data?.folders[folderId];
+    if (!folder) { return; }
+
+    const folderFileIds = new Set(folder.fileIds);
+
+    // Fade all planets not in this folder
+    this.planets.forEach((planet, fileId) => {
+      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+      if (folderFileIds.has(fileId)) {
+        material.opacity = 1;
+        material.transparent = false;
+      } else {
+        material.opacity = 0.05;
+        material.transparent = true;
+      }
+    });
+
+    // Fade all stars except clicked one
+    this.stars.forEach((star, id) => {
+      const material = star.mesh.material as THREE.MeshStandardMaterial;
+      if (id === folderId) {
+        material.opacity = 1;
+        material.transparent = false;
+      } else {
+        material.opacity = 0.05;
+        material.transparent = true;
+      }
+    });
+
+    // Fade labels — keep only clicked star's label
+    this.starLabels.forEach(label => {
+      (label.material as THREE.SpriteMaterial).opacity = 0.05;
+    });
+
+    // Show only dependency lines connected to this folder's files
+    this.lines.forEach(depLine => {
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      const isConnected =
+        folderFileIds.has(depLine.dependency.sourceId) ||
+        folderFileIds.has(depLine.dependency.targetId);
+      material.opacity = isConnected ? 0.9 : 0.02;
+      material.transparent = true;
+    });
+  }
+
+  private exitStarFocusMode(): void {
+    this.focusedStarId = null;
+
+    this.planets.forEach(planet => {
+      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = 1;
+      material.transparent = false;
+    });
+
+    this.stars.forEach(star => {
+      const material = star.mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = 1;
+      material.transparent = false;
+    });
+
+    this.starLabels.forEach(label => {
+      (label.material as THREE.SpriteMaterial).opacity = 1;
+    });
+
+    this.lines.forEach(depLine => {
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      material.opacity = depLine.baseOpacity;
+      material.transparent = true;
+    });
+  }
+
+  private initRefreshButton(): void {
+    const button = document.getElementById('refresh-universe');
+    if (!button) { return; }
+
+    button.addEventListener('click', () => {
+      sendToExtension({ type: 'REFRESH' });
+      // Show brief loading state
+      const overlay = document.getElementById('loading-overlay');
+      const loadingText = document.getElementById('loading-text');
+      if (overlay && loadingText) {
+        loadingText.textContent = 'Refreshing universe...';
+        overlay.style.display = 'flex';
+        overlay.style.opacity = '1';
+      }
+    });
+
+    button.addEventListener('mouseenter', () => {
+      button.style.background = 'rgba(255,255,255,0.1)';
+    });
+    button.addEventListener('mouseleave', () => {
+      button.style.background = 'rgba(0,0,0,0.85)';
+    });
   }
 
 }

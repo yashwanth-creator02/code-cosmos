@@ -9,7 +9,8 @@ type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
 type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string } }
-  | { type: 'SAVE_SETTINGS'; payload: SettingsState };
+  | { type: 'SAVE_SETTINGS'; payload: SettingsState }
+  | { type: 'REFRESH' };
 
 export class CosmosPanel {
   private static instance: CosmosPanel | undefined;
@@ -22,6 +23,8 @@ export class CosmosPanel {
   private isReady = false;
   private pendingMessage: LoadUniverseMessage | null = null;
   private pendingSettings: SettingsState | null = null;
+  private disposeCallbacks: (() => void)[] = [];
+  private onRefreshCallback: (() => Promise<void>) | null = null;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -76,6 +79,12 @@ export class CosmosPanel {
         case 'SAVE_SETTINGS':
           await this.context.globalState.update('cosmosSettings', message.payload);
           logger.log('Settings saved');
+          break;
+
+        case 'REFRESH':
+          if (this.onRefreshCallback) {
+            await this.onRefreshCallback();
+          }
           break;
       }
     });
@@ -158,9 +167,18 @@ export class CosmosPanel {
     }
   }
 
+  public onDispose(callback: () => void): void {
+    this.disposeCallbacks.push(callback);
+  }
+
   private dispose(): void {
+    this.disposeCallbacks.forEach(cb => cb());
     CosmosPanel.instance = undefined;
     logger.log('CosmosPanel disposed');
+  }
+
+  public setRefreshCallback(callback: () => Promise<void>): void {
+    this.onRefreshCallback = callback;
   }
 
   private getHtmlContent(): string {
@@ -461,9 +479,25 @@ export class CosmosPanel {
               <kbd style="opacity:0.6">Click again</kbd><span>Exit focus mode</span>
               <kbd style="opacity:0.6">Escape</kbd><span>Exit focus / search / panels</span>
               <kbd style="opacity:0.6">?</kbd><span>Toggle this panel</span>
+              <kbd style="opacity:0.6">Ctrl+U / F5</kbd><span>Refresh universe</span>
             </div>
             <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
           </div>
+
+          <button id="refresh-universe" style="
+            position: fixed;
+            bottom: 20px;
+            right: 215px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">↺</button>
 
           <script src="${scriptUri}"></script>
         </body>
