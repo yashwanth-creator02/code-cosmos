@@ -126,3 +126,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   enableFog: true,
   showLegend: true,
 };
+
+export interface FilterState {
+  visibleTypes: Set<FileType>;
+}

@@ -7,7 +7,6 @@ export class DependencyLine {
   public line: THREE.Line;
   public dependency: CosmosDependency;
   public readonly baseOpacity: number;
-  public readonly drawPriority: number;
 
   constructor(
     dependency: CosmosDependency,
@@ -16,50 +15,60 @@ export class DependencyLine {
   ) {
     this.dependency = dependency;
 
-    const points = [startPosition, endPosition];
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-    let color: number;
+    let color: THREE.Color;
     let opacity: number;
-    let priority: number;
 
     switch (dependency.layer) {
       case DependencyLayer.CIRCULAR:
-        color = 0xff1744;
+        color = new THREE.Color(0xFF1744);
         opacity = 0.8;
-        priority = 0;
         break;
       case DependencyLayer.DIRECT:
-        color = dependency.type === DependencyType.REFERENCE ? 0x7ee787 : 0xffffff;
-        opacity = dependency.type === DependencyType.REFERENCE ? 0.32 : 0.4;
-        priority = 1;
+        color = dependency.type === DependencyType.REFERENCE
+          ? new THREE.Color(0x7ee787)
+          : new THREE.Color(0xffffff);
+        opacity = 0.6;
         break;
       case DependencyLayer.INDIRECT:
-        color = 0x4488ff;
+        color = new THREE.Color(0x4488ff);
         opacity = 0.08;
-        priority = 2;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENT:
-        color = 0xffb300;
-        opacity = 0.04;
-        priority = 3;
+        color = new THREE.Color(0xFFB300);
+        opacity = 0.06;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENCY:
-        color = 0x00bcd4;
-        opacity = 0.04;
-        priority = 4;
+        color = new THREE.Color(0x00BCD4);
+        opacity = 0.06;
         break;
       default:
-        color = 0xffffff;
+        color = new THREE.Color(0xffffff);
         opacity = 0.1;
-        priority = 5;
     }
 
     this.baseOpacity = opacity;
-    this.drawPriority = priority;
+
+    // Use vertex colors for gradient direction effect
+    // Source vertex — full color (bright end)
+    // Target vertex — dark/faded end
+    const geometry = new THREE.BufferGeometry();
+
+    const positions = new Float32Array([
+      startPosition.x, startPosition.y, startPosition.z,
+      endPosition.x, endPosition.y, endPosition.z,
+    ]);
+
+    // Source is bright, target is dim — shows import direction
+    const colors = new Float32Array([
+      color.r, color.g, color.b,        // source — full color
+      color.r * 0.15, color.g * 0.15, color.b * 0.15, // target — very dim
+    ]);
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const material = new THREE.LineBasicMaterial({
-      color,
+      vertexColors: true,
       transparent: true,
       opacity,
     });

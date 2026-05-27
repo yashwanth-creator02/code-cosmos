@@ -480,6 +480,7 @@ export class CosmosPanel {
               <kbd style="opacity:0.6">Escape</kbd><span>Exit focus / search / panels</span>
               <kbd style="opacity:0.6">?</kbd><span>Toggle this panel</span>
               <kbd style="opacity:0.6">Ctrl+U / F5</kbd><span>Refresh universe</span>
+              <kbd style="opacity:0.6">T</kbd><span>Toggle file type filter</span>
             </div>
             <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
           </div>
@@ -498,6 +499,123 @@ export class CosmosPanel {
             cursor: pointer;
             z-index: 100;
           ">↺</button>
+
+          <!-- Filter bar -->
+          <div id="filter-bar" style="
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 100;
+          ">
+            <div style="
+              background: rgba(0,0,0,0.85);
+              border: 1px solid rgba(255,255,255,0.15);
+              border-radius: 8px;
+              padding: 10px 12px;
+              font-family: sans-serif;
+              font-size: 11px;
+              color: white;
+            ">
+              <div style="opacity:0.6;letter-spacing:1px;margin-bottom:8px;">FILE TYPES</div>
+              <div id="filter-buttons" style="display:flex;flex-direction:column;gap:4px;">
+                <button class="filter-btn" data-type="ts" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#00D2FF">⬤</span> TypeScript</button>
+
+                <button class="filter-btn" data-type="js" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#FFD700">⬤</span> JavaScript</button>
+
+                <button class="filter-btn" data-type="html" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#00E676">⬤</span> HTML</button>
+
+                <button class="filter-btn" data-type="css" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#E040FB">⬤</span> CSS</button>
+
+                <button class="filter-btn" data-type="py" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#FF6D00">⬤</span> Python</button>
+
+                <button class="filter-btn" data-type="java" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#FF3D00">⬤</span> Java</button>
+
+                <button class="filter-btn" data-type="asset" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#90A4AE">⬤</span> Assets</button>
+
+                <button class="filter-btn" data-type="other" style="
+                  display:flex;align-items:center;gap:8px;
+                  background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);
+                  color:white;padding:4px 10px;border-radius:4px;
+                  cursor:pointer;font-size:11px;text-align:left;
+                "><span style="color:#455A64">⬤</span> Other</button>
+              </div>
+
+              <div style="display:flex;gap:6px;margin-top:8px;">
+                <button id="filter-all" style="
+                  flex:1;padding:4px;background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);color:white;
+                  border-radius:4px;cursor:pointer;font-size:10px;
+                ">All</button>
+                <button id="filter-none" style="
+                  flex:1;padding:4px;background:rgba(255,255,255,0.1);
+                  border:1px solid rgba(255,255,255,0.2);color:white;
+                  border-radius:4px;cursor:pointer;font-size:10px;
+                ">None</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filter toggle button -->
+          <button id="filter-btn" style="
+            position: fixed;
+            bottom: 20px;
+            right: 255px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">⚡</button>
 
           <script src="${scriptUri}"></script>
         </body>

@@ -73,7 +73,9 @@ export class Universe {
   private settings: SettingsState = { ...DEFAULT_SETTINGS };
   private backgroundStars: THREE.Points | null = null;
   private focusedStarId: string | null = null;
-
+  private visibleTypes: Set<string> = new Set(
+    ['ts', 'js', 'html', 'css', 'py', 'java', 'asset', 'other']
+  );
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -137,6 +139,7 @@ export class Universe {
     this.initResetButton();
     this.initHelpButton();
     this.initRefreshButton();
+    this.initFilterBar();
     this.initSettingsPanel();
     this.addBackgroundStars();
     this.animate();
@@ -1027,6 +1030,17 @@ export class Universe {
   private animate(): void {
     requestAnimationFrame(() => this.animate());
 
+    // Pulse circular dependency lines
+    const pulse = (Math.sin(Date.now() * 0.003) + 1) / 2; // 0 to 1
+    this.lines.forEach(depLine => {
+      if (depLine.dependency.layer === DependencyLayer.CIRCULAR) {
+        const material = depLine.line.material as THREE.LineBasicMaterial;
+        if (!this.focusedFileId && !this.focusedStarId) {
+          material.opacity = 0.4 + pulse * 0.5; // pulses between 0.4 and 0.9
+        }
+      }
+    });
+
     this.updateSpacecraft();
 
     if (!this.spacecraftMode) {
@@ -1411,4 +1425,91 @@ export class Universe {
     });
   }
 
+  private initFilterBar(): void {
+    const bar = document.getElementById('filter-bar')!;
+    const toggleBtn = document.getElementById('filter-btn')!;
+
+    // Toggle bar visibility
+    toggleBtn.addEventListener('click', () => {
+      bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
+    });
+    toggleBtn.addEventListener('mouseenter', () => {
+      toggleBtn.style.background = 'rgba(255,255,255,0.1)';
+    });
+    toggleBtn.addEventListener('mouseleave', () => {
+      toggleBtn.style.background = 'rgba(0,0,0,0.85)';
+    });
+
+    // Wire each filter button
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      const type = (btn as HTMLElement).dataset.type!;
+
+      // Set initial active state
+      this.setFilterButtonActive(btn as HTMLElement, true);
+
+      btn.addEventListener('click', () => {
+        const isActive = this.visibleTypes.has(type);
+        if (isActive) {
+          this.visibleTypes.delete(type);
+          this.setFilterButtonActive(btn as HTMLElement, false);
+        } else {
+          this.visibleTypes.add(type);
+          this.setFilterButtonActive(btn as HTMLElement, true);
+        }
+        this.applyFilter();
+      });
+    });
+
+    // All / None buttons
+    document.getElementById('filter-all')!.addEventListener('click', () => {
+      ['ts', 'js', 'html', 'css', 'py', 'java', 'asset', 'other'].forEach(t => {
+        this.visibleTypes.add(t);
+      });
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        this.setFilterButtonActive(btn as HTMLElement, true);
+      });
+      this.applyFilter();
+    });
+
+    document.getElementById('filter-none')!.addEventListener('click', () => {
+      this.visibleTypes.clear();
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        this.setFilterButtonActive(btn as HTMLElement, false);
+      });
+      this.applyFilter();
+    });
+
+    // Keyboard shortcut T
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
+        bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
+      }
+    });
+  }
+
+  private setFilterButtonActive(btn: HTMLElement, active: boolean): void {
+    btn.style.background = active
+      ? 'rgba(255,255,255,0.2)'
+      : 'rgba(255,255,255,0.03)';
+    btn.style.opacity = active ? '1' : '0.4';
+  }
+
+  private applyFilter(): void {
+    this.planets.forEach((planet, fileId) => {
+      const file = this.data?.files[fileId];
+      if (!file) { return; }
+
+      const typeVisible = this.visibleTypes.has(file.extension.toLowerCase()) ||
+        this.visibleTypes.has(file.type);
+
+      planet.mesh.visible = typeVisible;
+
+      // Also hide dependency lines connected to hidden planets
+      this.lines.forEach(depLine => {
+        const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.mesh.visible ?? false;
+        const targetVisible = this.planets.get(depLine.dependency.targetId)?.mesh.visible ?? false;
+        depLine.line.visible = sourceVisible && targetVisible;
+      });
+    });
+  }
 }
