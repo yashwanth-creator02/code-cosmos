@@ -111,6 +111,7 @@ export interface SettingsState {
   showBackgroundStars: boolean;
   enableFog: boolean;
   showLegend: boolean;
+  performanceMode: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -125,6 +126,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   showBackgroundStars: true,
   enableFog: true,
   showLegend: true,
+  performanceMode: false,
 };
 
 export interface FilterState {

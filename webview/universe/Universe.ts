@@ -22,6 +22,7 @@ const PRESETS = {
     enableAnimation: false, orbitalSpeed: 1.0,
     showFolderLabels: true, showProximityLabels: true,
     showBackgroundStars: true, enableFog: true, showLegend: true,
+    performanceMode: false,
   },
   full: {
     showDirectLines: true, showIndirectLines: true,
@@ -29,6 +30,7 @@ const PRESETS = {
     enableAnimation: true, orbitalSpeed: 1.0,
     showFolderLabels: true, showProximityLabels: true,
     showBackgroundStars: true, enableFog: true, showLegend: true,
+    performanceMode: false,
   },
   performance: {
     showDirectLines: true, showIndirectLines: false,
@@ -36,6 +38,7 @@ const PRESETS = {
     enableAnimation: false, orbitalSpeed: 1.0,
     showFolderLabels: false, showProximityLabels: false,
     showBackgroundStars: false, enableFog: false, showLegend: true,
+    performanceMode: true,
   },
 };
 
@@ -74,6 +77,7 @@ export class Universe {
   private backgroundStars: THREE.Points | null = null;
   private focusedStarId: string | null = null;
   private visibleTypes: Set<string> = new Set(); // populated dynamically from repo data
+  private lastPerformanceMode = false;
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -243,7 +247,7 @@ export class Universe {
           80
         );
 
-        const planet = new Planet(file, position);
+        const planet = new Planet(file, position, this.settings.performanceMode);
         this.planets.set(fileId, planet);
         this.scene.add(planet.mesh);
 
@@ -388,7 +392,7 @@ export class Universe {
       node.position.z
     );
 
-    const star = new Star(folder, starPosition, node.subtreeFileCount);
+    const star = new Star(folder, starPosition, node.subtreeFileCount, this.settings.performanceMode);
     star.mesh.userData = {
       type: 'star',
       id: node.folderId,
@@ -423,7 +427,7 @@ export class Universe {
         orbitalRadius
       );
 
-      const planet = new Planet(file, position);
+      const planet = new Planet(file, position, this.settings.performanceMode);
       this.planets.set(fileId, planet);
       this.scene.add(planet.mesh);
 
@@ -965,8 +969,13 @@ export class Universe {
   }
 
   private addBackgroundStars(): void {
+    if (this.backgroundStars) {
+      this.scene.remove(this.backgroundStars);
+      this.backgroundStars = null;
+    }
+
+    const count = this.settings.performanceMode ? 300 : 2000;
     const geometry = new THREE.BufferGeometry();
-    const count = 2000;
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count * 3; i++) {
       positions[i] = (Math.random() - 0.5) * 10000;
@@ -1306,6 +1315,30 @@ export class Universe {
   }
 
   private applySettingsToScene(): void {
+    // Performance mode changes geometry — requires rebuild signal
+    // Store previous state to detect actual change
+    if (this.settings.performanceMode !== this.lastPerformanceMode) {
+      this.lastPerformanceMode = this.settings.performanceMode;
+      this.addBackgroundStars(); // rebuild background stars immediately
+
+      // Show indicator that full rebuild is needed for geometry changes
+      const indicator = document.getElementById('mode-indicator');
+      if (indicator) {
+        indicator.textContent = this.settings.performanceMode
+          ? '⚡ Performance Mode — refresh for full effect'
+          : '✨ Quality Mode — refresh for full effect';
+        indicator.style.opacity = '1';
+        setTimeout(() => { indicator.style.opacity = '0'; }, 3000);
+      }
+    }
+
+    // Performance mode — reduce pixel ratio to ease GPU load
+    if (this.settings.performanceMode) {
+      this.renderer.setPixelRatio(1);
+    } else {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+
     // Fog
     this.scene.fog = this.settings.enableFog
       ? new THREE.FogExp2(0x000000, 0.00006)
@@ -1400,6 +1433,7 @@ export class Universe {
     bindCheckbox('s-bg-stars', 'showBackgroundStars');
     bindCheckbox('s-fog', 'enableFog');
     bindCheckbox('s-legend', 'showLegend');
+    bindCheckbox('s-performance', 'performanceMode');
     bindSlider('s-speed', 'orbitalSpeed');
 
     // Preset buttons
@@ -1438,6 +1472,7 @@ export class Universe {
     set('s-bg-stars', this.settings.showBackgroundStars);
     set('s-fog', this.settings.enableFog);
     set('s-legend', this.settings.showLegend);
+    set('s-performance', this.settings.performanceMode);
     setVal('s-speed', this.settings.orbitalSpeed);
   }
 

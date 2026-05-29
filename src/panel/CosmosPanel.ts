@@ -446,6 +446,9 @@ export class CosmosPanel {
             <label><input type="checkbox" id="s-bg-stars" checked> Background stars</label><br>
             <label><input type="checkbox" id="s-fog" checked> Depth fog</label><br>
             <label><input type="checkbox" id="s-legend" checked> Legend</label><br>
+            <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
+              <label style="color:#FFB300"><input type="checkbox" id="s-performance"> ⚡ Performance Mode</label>
+            </div>
           </div>
 
           <!-- Keyboard shortcuts panel -->

@@ -34,10 +34,16 @@ export class Planet {
   public mesh: THREE.Mesh;
   public file: CosmosFile;
 
-  constructor(file: CosmosFile, position: THREE.Vector3) {
+  constructor(
+    file: CosmosFile,
+    position: THREE.Vector3,
+    performanceMode: boolean = false
+  ) {
     this.file = file;
 
-    const geometry = new THREE.SphereGeometry(2, 40, 40);
+    // Performance mode: 6 segments vs 40 — massive geometry reduction
+    const segments = performanceMode ? 6 : 40;
+    const geometry = new THREE.SphereGeometry(2, segments, segments);
 
     const material = new THREE.MeshStandardMaterial({
       color: FILE_TYPE_COLORS[file.type],
@@ -47,7 +53,6 @@ export class Planet {
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.position.copy(position);
-
     this.mesh.userData = { type: 'planet', id: file.id };
   }
 }
