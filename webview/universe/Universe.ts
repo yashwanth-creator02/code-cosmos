@@ -73,9 +73,7 @@ export class Universe {
   private settings: SettingsState = { ...DEFAULT_SETTINGS };
   private backgroundStars: THREE.Points | null = null;
   private focusedStarId: string | null = null;
-  private visibleTypes: Set<string> = new Set(
-    ['ts', 'js', 'html', 'css', 'py', 'java', 'asset', 'other']
-  );
+  private visibleTypes: Set<string> = new Set(); // populated dynamically from repo data
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -260,16 +258,129 @@ export class Universe {
     }
 
     this.drawDependencies(data.dependencies);
+    this.populateFilterBar(data);
+  }
+
+  // Build filter buttons dynamically from file types actually present in repo
+  private populateFilterBar(data: CosmosData): void {
+    const container = document.getElementById('filter-buttons');
+    if (!container) { return; }
+
+    // Collect all unique extensions present in this repo
+    const typeInfo: Map<string, { color: string; label: string; count: number }> = new Map([
+      ['ts', { color: '#00D2FF', label: 'TypeScript', count: 0 }],
+      ['tsx', { color: '#00D2FF', label: 'TSX', count: 0 }],
+      ['js', { color: '#FFD700', label: 'JavaScript', count: 0 }],
+      ['jsx', { color: '#FFD700', label: 'JSX', count: 0 }],
+      ['mjs', { color: '#FFD700', label: 'MJS', count: 0 }],
+      ['html', { color: '#00E676', label: 'HTML', count: 0 }],
+      ['css', { color: '#E040FB', label: 'CSS', count: 0 }],
+      ['scss', { color: '#E040FB', label: 'SCSS', count: 0 }],
+      ['sass', { color: '#E040FB', label: 'Sass', count: 0 }],
+      ['py', { color: '#FF6D00', label: 'Python', count: 0 }],
+      ['java', { color: '#FF3D00', label: 'Java', count: 0 }],
+      ['json', { color: '#B0BEC5', label: 'JSON', count: 0 }],
+      ['md', { color: '#78909C', label: 'Markdown', count: 0 }],
+      ['svg', { color: '#90A4AE', label: 'SVG', count: 0 }],
+      ['png', { color: '#90A4AE', label: 'Images', count: 0 }],
+      ['jpg', { color: '#90A4AE', label: 'Images', count: 0 }],
+      ['jpeg', { color: '#90A4AE', label: 'Images', count: 0 }],
+      ['gif', { color: '#90A4AE', label: 'Images', count: 0 }],
+      ['webp', { color: '#90A4AE', label: 'Images', count: 0 }],
+      ['ico', { color: '#90A4AE', label: 'Icon', count: 0 }],
+      ['woff', { color: '#607D8B', label: 'Font', count: 0 }],
+      ['woff2', { color: '#607D8B', label: 'Font', count: 0 }],
+      ['ttf', { color: '#607D8B', label: 'Font', count: 0 }],
+    ]);
+
+    // Count each extension
+    const presentTypes = new Map<string, { color: string; label: string; count: number }>();
+    Object.values(data.files).forEach(file => {
+      const ext = file.extension.toLowerCase();
+      if (typeInfo.has(ext)) {
+        const info = typeInfo.get(ext)!;
+        if (!presentTypes.has(ext)) {
+          presentTypes.set(ext, { ...info });
+        }
+        presentTypes.get(ext)!.count++;
+      } else if (ext) {
+        // Unknown extension — show it anyway
+        if (!presentTypes.has(ext)) {
+          presentTypes.set(ext, { color: '#455A64', label: ext.toUpperCase(), count: 0 });
+        }
+        presentTypes.get(ext)!.count++;
+      }
+    });
+
+    // Sort by count descending
+    const sorted = [...presentTypes.entries()].sort((a, b) => b[1].count - a[1].count);
+
+    // Initialize visibleTypes with all present types
+    this.visibleTypes = new Set(sorted.map(([ext]) => ext));
+
+    // Rebuild filter buttons
+    container.innerHTML = '';
+    sorted.forEach(([ext, info]) => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn';
+      btn.dataset.type = ext;
+      btn.style.cssText = `
+        display:flex;align-items:center;gap:8px;
+        background:rgba(255,255,255,0.15);
+        border:1px solid rgba(255,255,255,0.2);
+        color:white;padding:4px 10px;border-radius:4px;
+        cursor:pointer;font-size:11px;text-align:left;width:100%;
+        opacity:1;
+      `;
+      btn.innerHTML = `<span style="color:${info.color}">⬤</span> ${info.label} <span style="opacity:0.5;margin-left:auto">${info.count}</span>`;
+
+      btn.addEventListener('click', () => {
+        const isActive = this.visibleTypes.has(ext);
+        if (isActive) {
+          this.visibleTypes.delete(ext);
+          btn.style.background = 'rgba(255,255,255,0.03)';
+          btn.style.opacity = '0.4';
+        } else {
+          this.visibleTypes.add(ext);
+          btn.style.background = 'rgba(255,255,255,0.15)';
+          btn.style.opacity = '1';
+        }
+        this.applyFilter();
+      });
+
+      container.appendChild(btn);
+    });
+
+    // Wire All / None buttons
+    const allBtn = document.getElementById('filter-all');
+    const noneBtn = document.getElementById('filter-none');
+
+    if (allBtn) {
+      allBtn.onclick = () => {
+        sorted.forEach(([ext]) => this.visibleTypes.add(ext));
+        container.querySelectorAll('.filter-btn').forEach(b => {
+          (b as HTMLElement).style.background = 'rgba(255,255,255,0.15)';
+          (b as HTMLElement).style.opacity = '1';
+        });
+        this.applyFilter();
+      };
+    }
+    if (noneBtn) {
+      noneBtn.onclick = () => {
+        this.visibleTypes.clear();
+        container.querySelectorAll('.filter-btn').forEach(b => {
+          (b as HTMLElement).style.background = 'rgba(255,255,255,0.03)';
+          (b as HTMLElement).style.opacity = '0.4';
+        });
+        this.applyFilter();
+      };
+    }
   }
 
   private buildFromNode(node: StarNode, data: CosmosData): void {
     const folder = data.folders[node.folderId];
     if (!folder) { return; }
     if (folder.fileIds.length === 0 && folder.childFolderIds.length === 0) { return; }
-
-    if (folder.fileIds.length === 0 && folder.childFolderIds.length === 0) {
-      return;
-    }
 
     const starPosition = new THREE.Vector3(
       node.position.x,
@@ -288,7 +399,7 @@ export class Universe {
     this.scene.add(star.light);
     this.scene.add(star.mesh);
 
-    // Label scale and position shrinks with depth — deeper folders have smaller labels
+    // Label scale shrinks with depth
     const labelScale = Math.max(40, 120 - node.depth * 15);
     const labelYOffset = Math.max(12, 25 - node.depth * 3);
     const labelPosition = starPosition.clone();
@@ -297,8 +408,9 @@ export class Universe {
     this.starLabels.push(label);
     this.scene.add(label);
 
-    // Orbital radius for planets shrinks with depth
-    const orbitalRadius = Math.max(25, 90 - node.depth * 12);
+    // Files orbit their star in 3D (spherical distribution — close to star)
+    // Orbital radius: leaf folders get small radius, deeper = tighter
+    const orbitalRadius = Math.max(20, 70 - node.depth * 10);
 
     folder.fileIds.forEach((fileId, planetIndex) => {
       const file = data.files[fileId];
@@ -324,7 +436,7 @@ export class Universe {
       });
     });
 
-    // Recurse into children
+    // Recurse into child folders (they orbit this star in 2D — handled by starTree positions)
     node.childNodes.forEach(childNode => {
       this.buildFromNode(childNode, data);
     });
@@ -441,9 +553,7 @@ export class Universe {
       return;
     }
 
-    // Clicked empty space — exit everything
-    this.exitFocusMode();
-    this.exitStarFocusMode();
+    // Clicked empty space — do nothing, focus persists until Escape or exit button
   }
 
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
@@ -634,12 +744,13 @@ export class Universe {
     });
 
     this.lines.forEach(depLine => {
-      const material = depLine.line.material as THREE.LineBasicMaterial;
       const isConnected =
         depLine.dependency.sourceId === fileId ||
         depLine.dependency.targetId === fileId;
-      material.opacity = isConnected ? 0.9 : 0.02;
-      material.transparent = true;
+      // Use visible=false so lines truly disappear — not opacity (which turns black with vertexColors)
+      depLine.line.visible = isConnected;
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      if (isConnected) { material.opacity = 0.9; }
     });
   }
 
@@ -667,6 +778,9 @@ export class Universe {
       material.opacity = depLine.baseOpacity;
       material.transparent = true;
     });
+    // Re-apply settings — this correctly restores line visibility per user settings
+    // This handles both "show/hide by layer" toggles AND the exit from focus mode
+    this.applySettingsToScene();
   }
 
   private initSearch(): void {
@@ -1184,6 +1298,10 @@ export class Universe {
 
   public applySettings(settings: SettingsState): void {
     this.settings = settings;
+    // Sync checkboxes immediately so panel reflects saved state when opened
+    this.syncPanelToSettings();
+    // Apply to scene — if build() hasn't run yet, lines/stars are empty so this is a no-op
+    // build() will call applySettingsToScene() again once objects exist
     this.applySettingsToScene();
   }
 
@@ -1366,12 +1484,12 @@ export class Universe {
 
     // Show only dependency lines connected to this folder's files
     this.lines.forEach(depLine => {
-      const material = depLine.line.material as THREE.LineBasicMaterial;
       const isConnected =
         folderFileIds.has(depLine.dependency.sourceId) ||
         folderFileIds.has(depLine.dependency.targetId);
-      material.opacity = isConnected ? 0.9 : 0.02;
-      material.transparent = true;
+      depLine.line.visible = isConnected;
+      const material = depLine.line.material as THREE.LineBasicMaterial;
+      if (isConnected) { material.opacity = 0.9; }
     });
   }
 
@@ -1399,6 +1517,8 @@ export class Universe {
       material.opacity = depLine.baseOpacity;
       material.transparent = true;
     });
+    // Re-apply settings — restores visibility correctly per user toggle state
+    this.applySettingsToScene();
   }
 
   private initRefreshButton(): void {
@@ -1429,7 +1549,6 @@ export class Universe {
     const bar = document.getElementById('filter-bar')!;
     const toggleBtn = document.getElementById('filter-btn')!;
 
-    // Toggle bar visibility
     toggleBtn.addEventListener('click', () => {
       bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
     });
@@ -1440,45 +1559,6 @@ export class Universe {
       toggleBtn.style.background = 'rgba(0,0,0,0.85)';
     });
 
-    // Wire each filter button
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-      const type = (btn as HTMLElement).dataset.type!;
-
-      // Set initial active state
-      this.setFilterButtonActive(btn as HTMLElement, true);
-
-      btn.addEventListener('click', () => {
-        const isActive = this.visibleTypes.has(type);
-        if (isActive) {
-          this.visibleTypes.delete(type);
-          this.setFilterButtonActive(btn as HTMLElement, false);
-        } else {
-          this.visibleTypes.add(type);
-          this.setFilterButtonActive(btn as HTMLElement, true);
-        }
-        this.applyFilter();
-      });
-    });
-
-    // All / None buttons
-    document.getElementById('filter-all')!.addEventListener('click', () => {
-      ['ts', 'js', 'html', 'css', 'py', 'java', 'asset', 'other'].forEach(t => {
-        this.visibleTypes.add(t);
-      });
-      document.querySelectorAll('.filter-btn').forEach(btn => {
-        this.setFilterButtonActive(btn as HTMLElement, true);
-      });
-      this.applyFilter();
-    });
-
-    document.getElementById('filter-none')!.addEventListener('click', () => {
-      this.visibleTypes.clear();
-      document.querySelectorAll('.filter-btn').forEach(btn => {
-        this.setFilterButtonActive(btn as HTMLElement, false);
-      });
-      this.applyFilter();
-    });
-
     // Keyboard shortcut T
     window.addEventListener('keydown', (e) => {
       if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
@@ -1487,29 +1567,20 @@ export class Universe {
     });
   }
 
-  private setFilterButtonActive(btn: HTMLElement, active: boolean): void {
-    btn.style.background = active
-      ? 'rgba(255,255,255,0.2)'
-      : 'rgba(255,255,255,0.03)';
-    btn.style.opacity = active ? '1' : '0.4';
-  }
-
   private applyFilter(): void {
+    // First update planet visibility based on extension
     this.planets.forEach((planet, fileId) => {
       const file = this.data?.files[fileId];
       if (!file) { return; }
+      // Match by extension — dynamic filter uses raw extensions
+      planet.mesh.visible = this.visibleTypes.has(file.extension.toLowerCase());
+    });
 
-      const typeVisible = this.visibleTypes.has(file.extension.toLowerCase()) ||
-        this.visibleTypes.has(file.type);
-
-      planet.mesh.visible = typeVisible;
-
-      // Also hide dependency lines connected to hidden planets
-      this.lines.forEach(depLine => {
-        const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.mesh.visible ?? false;
-        const targetVisible = this.planets.get(depLine.dependency.targetId)?.mesh.visible ?? false;
-        depLine.line.visible = sourceVisible && targetVisible;
-      });
+    // Then update lines — only show if both endpoints are visible
+    this.lines.forEach(depLine => {
+      const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.mesh.visible ?? false;
+      const targetVisible = this.planets.get(depLine.dependency.targetId)?.mesh.visible ?? false;
+      depLine.line.visible = sourceVisible && targetVisible;
     });
   }
 }

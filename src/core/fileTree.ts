@@ -120,39 +120,41 @@ async function traverseDirectory(
 }
 
 // Calculates orbital radius based on depth
+// Folders orbit their parent in a 2D ring — radius shrinks with depth
 function getRadiusForDepth(depth: number): number {
-  // Base radius at depth 1 — distance from central sun to top level folders
-  const BASE_RADIUS = 350;
-  // Each level is 55% of the previous
-  const FALLOFF = 0.55;
-  // Minimum so deep folders still have breathing room
-  const MIN_RADIUS = 25;
-
+  const BASE_RADIUS = 400;  // depth 1: top-level folders orbit sun at 400
+  const FALLOFF = 0.52;     // each level is 52% of parent — feels natural
+  const MIN_RADIUS = 30;    // minimum so deep folders don't collapse
   return Math.max(MIN_RADIUS, BASE_RADIUS * Math.pow(FALLOFF, depth - 1));
 }
 
+// Places folders in a flat 2D ring around their parent (like planets around a star)
+// Y stays at parent level — strict 2D hierarchy, files get the 3D treatment
+function circularOrbitOffset(
+  index: number,
+  total: number,
+  radius: number,
+  parentPosition: { x: number; y: number; z: number }
+): { x: number; y: number; z: number } {
+  // Evenly space folders around a circle in the XZ plane
+  const angle = (index / Math.max(total, 1)) * Math.PI * 2;
+  // Add slight Y variation per depth level so levels don't overlap visually
+  const yJitter = (index % 2 === 0 ? 1 : -1) * radius * 0.08;
+  return {
+    x: parentPosition.x + radius * Math.cos(angle),
+    y: parentPosition.y + yJitter,
+    z: parentPosition.z + radius * Math.sin(angle),
+  };
+}
+
+// Keep for compatibility — used nowhere now but kept for reference
 function goldenAngleOffset(
   index: number,
   total: number,
   radius: number,
   parentPosition: { x: number; y: number; z: number }
 ): { x: number; y: number; z: number } {
-  // For single child — place directly above parent, not random
-  if (total === 1) {
-    return {
-      x: parentPosition.x,
-      y: parentPosition.y + radius,
-      z: parentPosition.z,
-    };
-  }
-
-  const phi = Math.acos(1 - (2 * (index + 0.5)) / Math.max(total, 1));
-  const theta = Math.PI * (1 + Math.sqrt(5)) * index;
-  return {
-    x: parentPosition.x + radius * Math.sin(phi) * Math.cos(theta),
-    y: parentPosition.y + radius * Math.sin(phi) * Math.sin(theta),
-    z: parentPosition.z + radius * Math.cos(phi),
-  };
+  return circularOrbitOffset(index, total, radius, parentPosition);
 }
 
 function countSubtreeFiles(
@@ -182,7 +184,7 @@ export function buildStarTree(
 
   const position = depth === 0
     ? { x: 0, y: 0, z: 0 }
-    : goldenAngleOffset(childIndex, totalChildren, radius, parentPosition);
+    : circularOrbitOffset(childIndex, totalChildren, radius, parentPosition);
 
   const subtreeFileCount = countSubtreeFiles(folderId, folders);
 
@@ -266,5 +268,3 @@ export async function buildFileTree(
 
   return data;
 }
-
-

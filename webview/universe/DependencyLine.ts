@@ -7,6 +7,7 @@ export class DependencyLine {
   public line: THREE.Line;
   public dependency: CosmosDependency;
   public readonly baseOpacity: number;
+  public readonly baseColor: THREE.Color;
 
   constructor(
     dependency: CosmosDependency,
@@ -47,10 +48,8 @@ export class DependencyLine {
     }
 
     this.baseOpacity = opacity;
+    this.baseColor = color;
 
-    // Use vertex colors for gradient direction effect
-    // Source vertex — full color (bright end)
-    // Target vertex — dark/faded end
     const geometry = new THREE.BufferGeometry();
 
     const positions = new Float32Array([
@@ -58,10 +57,10 @@ export class DependencyLine {
       endPosition.x, endPosition.y, endPosition.z,
     ]);
 
-    // Source is bright, target is dim — shows import direction
+    // Gradient: source bright, target dim — shows import direction
     const colors = new Float32Array([
-      color.r, color.g, color.b,        // source — full color
-      color.r * 0.15, color.g * 0.15, color.b * 0.15, // target — very dim
+      color.r, color.g, color.b,
+      color.r * 0.15, color.g * 0.15, color.b * 0.15,
     ]);
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
