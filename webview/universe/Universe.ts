@@ -94,7 +94,7 @@ export class Universe {
     this.camera.position.z = 1200;
     this.defaultCameraPosition = this.camera.position.clone();
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -140,6 +140,7 @@ export class Universe {
     this.initSearch();
     this.initResetButton();
     this.initHelpButton();
+    this.initExportButton();
     this.initRefreshButton();
     this.initFilterBar();
     this.initSettingsPanel();
@@ -803,10 +804,12 @@ export class Universe {
         const isVisible = container.style.display === 'block';
         container.style.display = isVisible ? 'none' : 'block';
         if (!isVisible) {
-          input.value = '';
-          results.style.display = 'none';
           input.focus();
         }
+      }
+
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !isTyping) {
+        this.exportImage();
       }
 
       if (e.key === 'Escape') {
@@ -816,14 +819,14 @@ export class Universe {
         this.exitFocusMode();
       }
 
-      if (e.key === 'r' || e.key === 'R') { this.resetCamera(); }
+      if ((e.key === 'r' || e.key === 'R') && !isTyping) { this.resetCamera(); }
 
-      if (e.key === '?') {
+      if (e.key === '?' && !isTyping) {
         const panel = document.getElementById('shortcuts-panel')!;
         panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
       }
 
-      if (e.key === 's' || e.key === 'S') {
+      if ((e.key === 's' || e.key === 'S') && !isTyping) {
         if (!e.ctrlKey) {
           const sp = document.getElementById('settings-panel')!;
           sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
@@ -1554,6 +1557,62 @@ export class Universe {
     });
     // Re-apply settings — restores visibility correctly per user toggle state
     this.applySettingsToScene();
+  }
+
+  private initExportButton(): void {
+    const btn = document.getElementById('export-btn');
+    if (!btn) { return; }
+
+    btn.addEventListener('click', () => this.exportImage());
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = 'rgba(255,255,255,0.1)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = 'rgba(0,0,0,0.85)';
+    });
+  }
+
+  private exportImage(): void {
+    // Hide all UI overlays before capturing
+    const uiElements = [
+      'tooltip', 'search-container', 'settings-panel',
+      'shortcuts-panel', 'filter-bar', 'legend',
+      'reset-camera', 'help-button', 'settings-btn',
+      'filter-btn', 'export-btn', 'refresh-universe',
+      'mode-indicator',
+    ];
+
+    const hidden: { el: HTMLElement; display: string }[] = [];
+
+    uiElements.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.style.display !== 'none') {
+        hidden.push({ el, display: el.style.display });
+        el.style.display = 'none';
+      }
+    });
+
+    // Render one clean frame
+    this.renderer.render(this.scene, this.camera);
+
+    // Capture canvas as PNG
+    const dataUrl = this.renderer.domElement.toDataURL('image/png');
+
+    // Restore UI
+    hidden.forEach(({ el, display }) => {
+      el.style.display = display;
+    });
+
+    // Send to extension host for saving
+    sendToExtension({ type: 'EXPORT_IMAGE', payload: { dataUrl } });
+
+    // Show brief indicator
+    const indicator = document.getElementById('mode-indicator');
+    if (indicator) {
+      indicator.textContent = '📷 Capturing...';
+      indicator.style.opacity = '1';
+      setTimeout(() => { indicator.style.opacity = '0'; }, 1500);
+    }
   }
 
   private initRefreshButton(): void {

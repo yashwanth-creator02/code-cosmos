@@ -10,7 +10,8 @@ type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string } }
   | { type: 'SAVE_SETTINGS'; payload: SettingsState }
-  | { type: 'REFRESH' };
+  | { type: 'REFRESH' }
+  | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
 
 export class CosmosPanel {
   private static instance: CosmosPanel | undefined;
@@ -86,8 +87,60 @@ export class CosmosPanel {
             await this.onRefreshCallback();
           }
           break;
+
+        case 'EXPORT_IMAGE':
+          await this.exportImage(message.payload.dataUrl);
+          break;
       }
     });
+  }
+
+  private async exportImage(dataUrl: string): Promise<void> {
+    try {
+      // Strip the data:image/png;base64, prefix
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const buffer = Buffer.from(base64, 'base64');
+
+      // Default filename with timestamp
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .slice(0, 19);
+      const defaultName = `code-cosmos-${timestamp}.png`;
+
+      // Ask user where to save
+      const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(
+          require('path').join(
+            vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+            defaultName
+          )
+        ),
+        filters: { 'PNG Image': ['png'] },
+        title: 'Save Code Cosmos Screenshot',
+      });
+
+      if (!uri) { return; } // user cancelled
+
+      await vscode.workspace.fs.writeFile(uri, buffer);
+
+      const open = await vscode.window.showInformationMessage(
+        `Code Cosmos: Screenshot saved to ${uri.fsPath}`,
+        'Open File',
+        'Show in Explorer'
+      );
+
+      if (open === 'Open File') {
+        await vscode.commands.executeCommand('vscode.open', uri);
+      } else if (open === 'Show in Explorer') {
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+      }
+
+      logger.log(`Screenshot saved: ${uri.fsPath}`);
+    } catch (err) {
+      logger.error(`Export failed: ${err}`);
+      vscode.window.showErrorMessage(`Code Cosmos: Export failed — ${err}`);
+    }
   }
 
   private async openFile(fileId: string): Promise<void> {
@@ -484,6 +537,7 @@ export class CosmosPanel {
               <kbd style="opacity:0.6">?</kbd><span>Toggle this panel</span>
               <kbd style="opacity:0.6">Ctrl+U / F5</kbd><span>Refresh universe</span>
               <kbd style="opacity:0.6">T</kbd><span>Toggle file type filter</span>
+              <kbd style="opacity:0.6">P</kbd><span>Export as PNG</span>
             </div>
             <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
           </div>
@@ -502,6 +556,22 @@ export class CosmosPanel {
             cursor: pointer;
             z-index: 100;
           ">↺</button>
+
+          <!-- Export button -->
+          <button id="export-btn" title="Export as PNG" style="
+            position: fixed;
+            bottom: 20px;
+            right: 295px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">📷</button>
 
           <!-- Filter bar — populated dynamically after build() -->
           <div id="filter-bar" style="
