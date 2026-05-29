@@ -12,6 +12,8 @@ import {
   computeLayer3Dependencies,
   dedupeDependencies,
 } from './dependencyParser';
+import { readGitData } from './gitReader';
+
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
@@ -224,6 +226,7 @@ export async function buildFileTree(
     rootFolderId: '.',
     workspaceRoots: { [workspaceName]: workspaceRoot },
     starTree: null,
+    gitData: null,
   };
 
   data.folders['.'] = {
@@ -265,6 +268,10 @@ export async function buildFileTree(
 
   data.starTree = buildStarTree('.', data.folders, { x: 0, y: 0, z: 0 }, 0, 0, 1);
   logger.log('Star tree built');
+
+  // Read git data after file tree is built
+  logger.log('Reading git data...');
+  data.gitData = await readGitData(workspaceRoot, Object.keys(data.files));
 
   return data;
 }

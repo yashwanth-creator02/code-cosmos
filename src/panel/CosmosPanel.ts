@@ -628,6 +628,26 @@ export class CosmosPanel {
             z-index: 100;
           ">⚡</button>
 
+          <div id="git-hud" style="
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            background: rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: sans-serif;
+            font-size: 11px;
+            z-index: 100;
+            display: none;
+            backdrop-filter: blur(4px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+          ">
+            <span style="opacity:0.6;margin-right:4px;">⎇</span>
+            <span id="git-branch" style="font-weight:bold;letter-spacing:0.5px;">—</span>
+          </div>
+
           <script src="${scriptUri}"></script>
         </body>
       </html>

@@ -42,6 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
           rootFolderId: '.',
           workspaceRoots: {},
           starTree: null,
+          gitData: null,
         };
 
         for (let i = 0; i < workspaceFolders.length; i++) {
@@ -93,6 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
           if (i === 0 && data.starTree) {
             allData.starTree = prefixStarTree(data.starTree, prefix);
             allData.rootFolderId = prefix + '.';
+            allData.gitData = data.gitData;
           }
         }
 
@@ -148,66 +150,6 @@ export function activate(context: vscode.ExtensionContext) {
         const watcher = vscode.workspace.createFileSystemWatcher('**/*');
 
         let debounceTimer: NodeJS.Timeout | null = null;
-
-        const buildAllWorkspaces = async (folders: readonly vscode.WorkspaceFolder[]): Promise<CosmosData> => {
-          const freshData: CosmosData = {
-            files: {},
-            folders: {},
-            dependencies: [],
-            rootFolderId: '.',
-            workspaceRoots: {},
-            starTree: null,
-          };
-
-          for (let i = 0; i < folders.length; i++) {
-            const folder = folders[i];
-            const offset = {
-              x: (i - (folders.length - 1) / 2) * GALAXY_SPACING,
-              y: 0,
-              z: 0,
-            };
-
-            const data = await buildFileTree(folder, offset);
-            const prefix = `${folder.name}:`;
-
-            for (const [name, root] of Object.entries(data.workspaceRoots)) {
-              freshData.workspaceRoots[name] = root;
-            }
-
-            for (const [id, file] of Object.entries(data.files)) {
-              freshData.files[prefix + id] = {
-                ...file,
-                id: prefix + id,
-                folderId: prefix + file.folderId,
-              };
-            }
-
-            for (const [id, folderData] of Object.entries(data.folders)) {
-              freshData.folders[prefix + id] = {
-                ...folderData,
-                id: prefix + id,
-                parentId: folderData.parentId ? prefix + folderData.parentId : null,
-                fileIds: folderData.fileIds.map(fid => prefix + fid),
-                childFolderIds: folderData.childFolderIds.map(cid => prefix + cid),
-              };
-            }
-
-            freshData.dependencies.push(
-              ...data.dependencies.map(dep => ({
-                ...dep,
-                sourceId: prefix + dep.sourceId,
-                targetId: prefix + dep.targetId,
-              }))
-            );
-
-            if (i === 0 && data.starTree) {
-              freshData.starTree = prefixStarTree(data.starTree, prefix);
-              freshData.rootFolderId = prefix + '.';
-            }
-          }
-
-          return freshData;
-        };
 
         const handleChange = (uri: vscode.Uri) => {
           // Ignore changes in excluded folders
@@ -274,6 +216,7 @@ async function buildAllWorkspaces(
     rootFolderId: '.',
     workspaceRoots: {},
     starTree: null,
+    gitData: null,
   };
 
   for (let i = 0; i < workspaceFolders.length; i++) {
@@ -320,6 +263,7 @@ async function buildAllWorkspaces(
     if (i === 0 && data.starTree) {
       allData.starTree = prefixStarTree(data.starTree, prefix);
       allData.rootFolderId = prefix + '.';
+      allData.gitData = data.gitData;
     }
   }
 

@@ -97,6 +97,7 @@ export interface CosmosData {
   rootFolderId: string;
   workspaceRoots: Record<string, string>;
   starTree: StarNode | null;
+  gitData: GitData | null;
 }
 
 export interface SettingsState {
@@ -131,4 +132,16 @@ export const DEFAULT_SETTINGS: SettingsState = {
 
 export interface FilterState {
   visibleTypes: Set<FileType>;
+}
+
+export interface GitFileInfo {
+  commitCount: number;
+  daysSinceLastChange: number;
+  hasUncommittedChanges: boolean;
+}
+
+export interface GitData {
+  branch: string;
+  fileInfo: Record<string, GitFileInfo>;
+  available: boolean;
 }

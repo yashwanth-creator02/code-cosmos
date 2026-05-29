@@ -12,7 +12,7 @@ import {
   DependencyLayer,
   DependencyType,
   CosmosData,
-  StarNode, SettingsState, DEFAULT_SETTINGS
+  StarNode, SettingsState, DEFAULT_SETTINGS, GitData
 } from '../../src/types';
 
 const PRESETS = {
@@ -78,6 +78,7 @@ export class Universe {
   private focusedStarId: string | null = null;
   private visibleTypes: Set<string> = new Set(); // populated dynamically from repo data
   private lastPerformanceMode = false;
+  private gitData: GitData | null = null;
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -201,6 +202,7 @@ export class Universe {
   }
 
   public build(data: CosmosData): void {
+    this.gitData = data.gitData;
     this.data = data;
     this.dependencies = data.dependencies;
     this.focusedFileId = null;
@@ -215,6 +217,7 @@ export class Universe {
     this.lines.forEach(line => this.disposeSceneObject(line.line));
     this.planetLabels.forEach(label => this.disposeSceneObject(label));
     this.centralObjects.forEach(object => this.disposeSceneObject(object));
+    this.uncommittedRings.forEach(r => this.scene.remove(r));
 
     this.stars.clear();
     this.planets.clear();
@@ -224,6 +227,8 @@ export class Universe {
     this.planetLabels.clear();
     this.centralObjects = [];
     this.centralCore = null;
+    this.uncommittedRings.forEach(r => this.scene.remove(r));
+    this.uncommittedRings.clear();
 
     const rootFolder = data.folders[data.rootFolderId];
     this.addCentralBody(rootFolder);
@@ -264,6 +269,22 @@ export class Universe {
 
     this.drawDependencies(data.dependencies);
     this.populateFilterBar(data);
+    this.applySettingsToScene();
+    this.applyGitVisuals();
+    this.updateGitHud();
+  }
+
+  private updateGitHud(): void {
+    const hud = document.getElementById('git-hud');
+    const branchSpan = document.getElementById('git-branch');
+    if (!hud || !branchSpan) { return; }
+
+    if (this.gitData?.available) {
+      hud.style.display = 'block';
+      branchSpan.textContent = this.gitData.branch;
+    } else {
+      hud.style.display = 'none';
+    }
   }
 
   // Build filter buttons dynamically from file types actually present in repo
@@ -654,6 +675,28 @@ export class Universe {
           && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY
       ).length;
 
+      // Git info
+      let gitHtml = '';
+      if (this.gitData?.available) {
+        const cleanId = hoveredFileId.includes(':')
+          ? hoveredFileId.split(':').slice(1).join(':')
+          : hoveredFileId;
+        const info = this.gitData.fileInfo[cleanId];
+        if (info) {
+          const recency = info.daysSinceLastChange === 999
+            ? 'Never committed'
+            : info.daysSinceLastChange === 0
+              ? 'Changed today'
+              : `${info.daysSinceLastChange}d ago`;
+
+          gitHtml = `
+            <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:6px 0;">
+            <span style="color:#FFD700">⬤</span> ${info.commitCount} commits · ${recency}
+            ${info.hasUncommittedChanges ? '<br><span style="color:#FF8C00">⬤ Uncommitted changes</span>' : ''}
+          `;
+        }
+      }
+
       tooltip.style.display = 'block';
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
@@ -665,6 +708,7 @@ export class Universe {
         <span style="color:#FFB300">⬤</span> Shared dependent: ${sharedDependentCount}<br>
         <span style="color:#00BCD4">⬤</span> Shared dependency: ${sharedDependencyCount}<br>
         ${isCircular ? '<span style="color:#FF1744">⬤ Circular dependency</span><br>' : ''}
+        ${gitHtml}
       `;
       return;
     }
@@ -676,7 +720,7 @@ export class Universe {
     }
     this.lastMouseMoveTime = now;
 
-    const lineMeshes = this.lines.map(l => l.line);
+    const lineMeshes = this.lines.filter(l => l.line.visible).map(l => l.line);
     const lineIntersects = this.raycaster.intersectObjects(lineMeshes);
 
     if (lineIntersects.length > 0) {
@@ -786,6 +830,7 @@ export class Universe {
     // Re-apply settings — this correctly restores line visibility per user settings
     // This handles both "show/hide by layer" toggles AND the exit from focus mode
     this.applySettingsToScene();
+    this.applyGitVisuals();
   }
 
   private initSearch(): void {
@@ -1221,6 +1266,17 @@ export class Universe {
     if (this.settings.showProximityLabels) {
       this.updateProximityLabels();
     }
+
+    // Uncommitted change rings always face camera and follow planets
+    const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3; // 0.3 to 0.9
+    this.uncommittedRings.forEach((ring, fileId) => {
+      const planet = this.planets.get(fileId);
+      if (planet) {
+        ring.position.copy(planet.mesh.position);
+      }
+      ring.quaternion.copy(this.camera.quaternion);
+      (ring.material as THREE.MeshBasicMaterial).opacity = ringPulse;
+    });
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -1676,5 +1732,71 @@ export class Universe {
       const targetVisible = this.planets.get(depLine.dependency.targetId)?.mesh.visible ?? false;
       depLine.line.visible = sourceVisible && targetVisible;
     });
+  }
+
+  private applyGitVisuals(): void {
+    if (!this.gitData?.available) { return; }
+
+    const fileInfo = this.gitData.fileInfo;
+
+    // Find max commit count for normalization
+    const maxCommits = Math.max(
+      1,
+      ...Object.values(fileInfo).map(f => f.commitCount)
+    );
+
+    this.planets.forEach((planet, fileId) => {
+      // Strip workspace prefix from fileId for lookup
+      const cleanId = fileId.includes(':') ? fileId.split(':').slice(1).join(':') : fileId;
+      const info = fileInfo[cleanId];
+      if (!info) { return; }
+
+      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+
+      // Recency glow — files changed in last 7 days glow brighter
+      if (info.daysSinceLastChange <= 7) {
+        const recencyFactor = 1 - (info.daysSinceLastChange / 7);
+        material.emissiveIntensity = 0.3 + recencyFactor * 0.7; // 0.3 to 1.0
+      } else if (info.daysSinceLastChange > 90) {
+        // Old files slightly dimmer
+        material.emissiveIntensity = 0.1;
+      }
+
+      // Hotspot size — scale planet by commit frequency
+      if (info.commitCount > 0) {
+        const normalizedCount = info.commitCount / maxCommits;
+        const scaleFactor = 1 + normalizedCount * 1.5; // up to 2.5x size
+        planet.mesh.scale.setScalar(scaleFactor);
+      }
+
+      // Uncommitted changes — add orange ring around planet
+      if (info.hasUncommittedChanges) {
+        this.addUncommittedRing(fileId, planet.mesh.position, planet.mesh.scale.x);
+      }
+    });
+  }
+
+  private uncommittedRings: Map<string, THREE.Mesh> = new Map();
+
+  private addUncommittedRing(fileId: string, position: THREE.Vector3, planetScale: number): void {
+    if (this.uncommittedRings.has(fileId)) {
+      return;
+    }
+
+    const ringGeo = new THREE.RingGeometry(
+      2.2 * planetScale,  // inner radius
+      2.8 * planetScale,  // outer radius
+      16
+    );
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xFF8C00,    // orange
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.copy(position);
+    this.uncommittedRings.set(fileId, ring);
+    this.scene.add(ring);
   }
 }
