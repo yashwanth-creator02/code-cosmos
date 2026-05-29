@@ -499,6 +499,7 @@ export class CosmosPanel {
             <label><input type="checkbox" id="s-bg-stars" checked> Background stars</label><br>
             <label><input type="checkbox" id="s-fog" checked> Depth fog</label><br>
             <label><input type="checkbox" id="s-legend" checked> Legend</label><br>
+            <label><input type="checkbox" id="s-minimap"> Minimap</label><br>
             <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
               <label style="color:#FFB300"><input type="checkbox" id="s-performance"> ⚡ Performance Mode</label>
             </div>
@@ -538,6 +539,7 @@ export class CosmosPanel {
               <kbd style="opacity:0.6">Ctrl+U / F5</kbd><span>Refresh universe</span>
               <kbd style="opacity:0.6">T</kbd><span>Toggle file type filter</span>
               <kbd style="opacity:0.6">P</kbd><span>Export as PNG</span>
+              <kbd style="opacity:0.6">M</kbd><span>Toggle minimap</span>
             </div>
             <div style="margin-top:16px;opacity:0.4;font-size:11px;text-align:center;">Press ? or Escape to close</div>
           </div>
@@ -647,6 +649,50 @@ export class CosmosPanel {
             <span style="opacity:0.6;margin-right:4px;">⎇</span>
             <span id="git-branch" style="font-weight:bold;letter-spacing:0.5px;">—</span>
           </div>
+
+          <!-- Minimap -->
+          <div id="minimap-container" style="
+            position: fixed;
+            bottom: 70px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            cursor: crosshair;
+            display: none;
+            backdrop-filter: blur(4px);
+          ">
+            <canvas id="minimap-canvas" width="150" height="150"></canvas>
+            <div style="
+              position: absolute;
+              top: 4px;
+              left: 6px;
+              font-family: sans-serif;
+              font-size: 9px;
+              color: rgba(255,255,255,0.4);
+              pointer-events: none;
+            ">MINIMAP</div>
+          </div>
+
+          <!-- Minimap toggle button -->
+          <button id="minimap-btn" title="Toggle Minimap" style="
+            position: fixed;
+            bottom: 20px;
+            right: 335px;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 100;
+          ">🗺</button>
 
           <script src="${scriptUri}"></script>
         </body>

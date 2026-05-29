@@ -79,6 +79,10 @@ export class Universe {
   private visibleTypes: Set<string> = new Set(); // populated dynamically from repo data
   private lastPerformanceMode = false;
   private gitData: GitData | null = null;
+  private minimapCanvas: HTMLCanvasElement | null = null;
+  private minimapCtx: CanvasRenderingContext2D | null = null;
+  private minimapVisible = false;
+  private readonly MINIMAP_WORLD_SIZE = 1200; // world units shown in minimap
 
 
   constructor(canvas: HTMLCanvasElement) {
@@ -142,6 +146,7 @@ export class Universe {
     this.initResetButton();
     this.initHelpButton();
     this.initExportButton();
+    this.initMinimap();
     this.initRefreshButton();
     this.initFilterBar();
     this.initSettingsPanel();
@@ -1279,6 +1284,7 @@ export class Universe {
     });
 
     this.renderer.render(this.scene, this.camera);
+    this.drawMinimap();
   }
 
   private updateDependencyLines(): void {
@@ -1443,6 +1449,14 @@ export class Universe {
 
       depLine.line.visible = visible;
     });
+
+    // Minimap visibility
+    const minimapBtn = document.getElementById('minimap-btn');
+    if (this.settings.showMinimap && !this.minimapVisible) {
+      minimapBtn?.click(); // turn on
+    } else if (!this.settings.showMinimap && this.minimapVisible) {
+      minimapBtn?.click(); // turn off
+    }
   }
 
   private initSettingsPanel(): void {
@@ -1493,6 +1507,7 @@ export class Universe {
     bindCheckbox('s-fog', 'enableFog');
     bindCheckbox('s-legend', 'showLegend');
     bindCheckbox('s-performance', 'performanceMode');
+    bindCheckbox('s-minimap', 'showMinimap');
     bindSlider('s-speed', 'orbitalSpeed');
 
     // Preset buttons
@@ -1532,6 +1547,7 @@ export class Universe {
     set('s-fog', this.settings.enableFog);
     set('s-legend', this.settings.showLegend);
     set('s-performance', this.settings.performanceMode);
+    set('s-minimap', this.settings.showMinimap);
     setVal('s-speed', this.settings.orbitalSpeed);
   }
 
@@ -1798,5 +1814,172 @@ export class Universe {
     ring.position.copy(position);
     this.uncommittedRings.set(fileId, ring);
     this.scene.add(ring);
+  }
+
+  private initMinimap(): void {
+    const container = document.getElementById('minimap-container');
+    const canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+    const btn = document.getElementById('minimap-btn');
+    if (!canvas || !btn) { return; }
+
+    this.minimapCanvas = canvas;
+    this.minimapCtx = canvas.getContext('2d');
+
+    // Toggle minimap
+    btn.addEventListener('click', () => {
+      this.minimapVisible = !this.minimapVisible;
+      if (container) {
+        container.style.display = this.minimapVisible ? 'block' : 'none';
+      }
+      btn.style.background = this.minimapVisible
+        ? 'rgba(255,255,255,0.2)'
+        : 'rgba(0,0,0,0.85)';
+    });
+
+    btn.addEventListener('mouseenter', () => {
+      if (!this.minimapVisible) {
+        btn.style.background = 'rgba(255,255,255,0.1)';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (!this.minimapVisible) {
+        btn.style.background = 'rgba(0,0,0,0.85)';
+      }
+    });
+
+    // Click minimap to teleport camera
+    canvas.addEventListener('click', (e) => {
+      if (!this.minimapCtx) { return; }
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const size = canvas.width;
+
+      // Convert minimap coords to world coords
+      const worldX = (mx / size - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
+      const worldZ = (my / size - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
+
+      // Fly camera to clicked position
+      const target = new THREE.Vector3(worldX, 0, worldZ);
+      const startPos = this.camera.position.clone();
+      const startTarget = this.controls.target.clone();
+      const endPos = new THREE.Vector3(worldX, this.camera.position.y, worldZ);
+
+      let progress = 0;
+      const fly = () => {
+        if (progress >= 30) {
+          this.controls.target.copy(target);
+          this.controls.update();
+          return;
+        }
+        progress++;
+        const t = progress / 30;
+        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        this.camera.position.lerpVectors(startPos, endPos, eased);
+        this.controls.target.lerpVectors(startTarget, target, eased);
+        this.controls.update();
+        requestAnimationFrame(fly);
+      };
+      fly();
+    });
+
+    // Keyboard shortcut M (moved to initSearch for consistency if preferred, but user asked here)
+    // I'll leave it here as requested.
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
+        btn.click();
+      }
+    });
+  }
+
+  private drawMinimap(): void {
+    if (!this.minimapVisible || !this.minimapCtx || !this.minimapCanvas) { return; }
+
+    const ctx = this.minimapCtx;
+    const size = this.minimapCanvas.width;
+    const half = size / 2;
+    const worldHalf = this.MINIMAP_WORLD_SIZE;
+
+    // Convert world pos to minimap pixel
+    const toMinimap = (x: number, z: number): [number, number] => {
+      const px = (x / worldHalf) * half + half;
+      const py = (z / worldHalf) * half + half;
+      return [px, py];
+    };
+
+    // Clear
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw stars as larger dots
+    this.stars.forEach((star) => {
+      const [px, py] = toMinimap(star.mesh.position.x, star.mesh.position.z);
+      if (px < 0 || px > size || py < 0 || py > size) { return; }
+      ctx.beginPath();
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 244, 180, 0.8)';
+      ctx.fill();
+    });
+
+    // Draw planets as tiny dots colored by type
+    this.planets.forEach((planet) => {
+      if (!planet.mesh.visible) { return; }
+      const [px, py] = toMinimap(planet.mesh.position.x, planet.mesh.position.z);
+      if (px < 0 || px > size || py < 0 || py > size) { return; }
+
+      // Get planet color from material
+      const mat = planet.mesh.material as THREE.MeshStandardMaterial;
+      const col = mat.color;
+      ctx.beginPath();
+      ctx.arc(px, py, 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = `rgb(${Math.floor(col.r * 255)},${Math.floor(col.g * 255)},${Math.floor(col.b * 255)})`;
+      ctx.fill();
+    });
+
+    // Draw central sun
+    const [cx, cy] = toMinimap(0, 0);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffaa00';
+    ctx.fill();
+
+    // Draw camera position and frustum
+    const [campx, campy] = toMinimap(this.camera.position.x, this.camera.position.z);
+    
+    // Viewport frustum (improvised)
+    const direction = new THREE.Vector3();
+    this.camera.getWorldDirection(direction);
+    const angle = Math.atan2(direction.z, direction.x);
+    const fov = (this.camera.fov * Math.PI) / 180 / 2;
+    const viewDist = 20;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(campx, campy);
+    ctx.arc(campx, campy, viewDist, angle - fov, angle + fov);
+    ctx.closePath();
+    ctx.fill();
+
+    // Camera crosshair
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(campx - 5, campy);
+    ctx.lineTo(campx + 5, campy);
+    ctx.moveTo(campx, campy - 5);
+    ctx.lineTo(campx, campy + 5);
+    ctx.stroke();
+
+    // Dot at camera position
+    ctx.beginPath();
+    ctx.arc(campx, campy, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, size, size);
   }
 }

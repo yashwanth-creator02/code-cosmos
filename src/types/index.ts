@@ -113,6 +113,7 @@ export interface SettingsState {
   enableFog: boolean;
   showLegend: boolean;
   performanceMode: boolean;
+  showMinimap: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -128,6 +129,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   enableFog: true,
   showLegend: true,
   performanceMode: false,
+  showMinimap: false,
 };
 
 export interface FilterState {
