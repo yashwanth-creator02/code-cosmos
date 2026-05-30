@@ -9,6 +9,16 @@ export enum FileType {
   JAVA = 'java',
   ASSET = 'asset',
   OTHER = 'other',
+  // New languages
+  RUST = 'rs',
+  GO = 'go',
+  CPP = 'cpp',
+  RUBY = 'rb',
+  PHP = 'php',
+  SWIFT = 'swift',
+  KOTLIN = 'kt',
+  VUE = 'vue',
+  SVELTE = 'svelte',
 }
 
 export enum DependencyLayer {

@@ -28,6 +28,17 @@ const FILE_TYPE_COLORS: Record<FileType, number> = {
 
   // Subtle muted charcoal - keeps unimportant files in the background
   [FileType.OTHER]: 0x455A64,
+
+  // New languages — each distinct, visually balanced on black
+  [FileType.RUST]:   0xF74C00,  // Rust orange (matches the language logo)
+  [FileType.GO]:     0x00ACD7,  // Go's official cyan-blue
+  [FileType.CPP]:    0x004488,  // Deep navy blue (classic C++ association)
+  [FileType.RUBY]:   0xCC342D,  // Ruby red
+  [FileType.PHP]:    0x8892BF,  // PHP indigo-blue
+  [FileType.SWIFT]:  0xF05138,  // Swift orange-red (matches Apple branding)
+  [FileType.KOTLIN]: 0x7F52FF,  // Kotlin purple (JetBrains official)
+  [FileType.VUE]:    0x42B883,  // Vue green (official)
+  [FileType.SVELTE]: 0xFF3E00,  // Svelte flame orange (official)
 };
 
 export class Planet {

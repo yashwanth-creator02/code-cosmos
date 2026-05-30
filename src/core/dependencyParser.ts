@@ -80,18 +80,22 @@ const HTML_REFERENCE_ATTRIBUTES = [
 ];
 
 const PARSEABLE_DEPENDENCY_EXTENSIONS = new Set([
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
-  'html',
-  'css',
-  'scss',
-  'sass',
+  // JS/TS family
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  // Web
+  'html', 'css', 'scss', 'sass',
+  // Vue & Svelte
+  'vue', 'svelte',
+  // Python
   'py',
-  'java',
+  // JVM
+  'java', 'kt', 'kts',
+  // Systems
+  'rs', 'go', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp',
+  // Scripting
+  'rb', 'php',
+  // Apple
+  'swift',
 ]);
 
 function normalizePath(value: string): string {
@@ -895,6 +899,386 @@ function parseJavaDependencies(
   return deps;
 }
 
+
+// ─── Rust ────────────────────────────────────────────────────────────────────
+// Handles: mod declarations, use statements, extern crate
+// mod foo;              → looks for foo.rs or foo/mod.rs
+// use crate::foo::bar;  → resolves within workspace
+function parseRustDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // mod declarations: mod foo; or pub mod foo;
+  const modRegex = /^\s*(?:pub\s+)?mod\s+(\w+)\s*;/gm;
+  let match: RegExpExecArray | null;
+  while ((match = modRegex.exec(content)) !== null) {
+    const modName = match[1];
+    // Try foo.rs then foo/mod.rs
+    const candidates = [
+      `${sourceDir}/${modName}.rs`,
+      `${sourceDir}/${modName}/mod.rs`,
+    ];
+    for (const candidate of candidates) {
+      const resolved = normalizedFileIds[candidate];
+      if (resolved && resolved !== fileId) {
+        deps.push({
+          sourceId: fileId,
+          targetId: resolved,
+          layer: DependencyLayer.DIRECT,
+          type: DependencyType.IMPORT,
+          specifier: modName,
+          referenceKind: DependencyReferenceKind.STATIC_IMPORT,
+          resolvedBy: DependencyResolutionKind.RELATIVE,
+        });
+        break;
+      }
+    }
+  }
+
+  return dedupeDependencies(deps);
+}
+
+// ─── Go ──────────────────────────────────────────────────────────────────────
+// Handles: import "path" and import ( "path1" "path2" )
+// Only resolves local imports (starting with ./)
+function parseGoDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // Match both single and grouped imports
+  const importRegex = /import\s+(?:[\w]+\s+)?["`]([^"`]+)["`]/g;
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(content)) !== null) {
+    const importPath = match[1];
+    // Only resolve relative imports
+    if (!importPath.startsWith('.')) { continue; }
+    const candidate = normalizePath(`${sourceDir}/${importPath}`);
+    // Go packages are directories — look for any .go file inside
+    for (const [norm, orig] of Object.entries(normalizedFileIds)) {
+      if (norm.startsWith(candidate + '/') && norm.endsWith('.go')) {
+        deps.push({
+          sourceId: fileId,
+          targetId: orig,
+          layer: DependencyLayer.DIRECT,
+          type: DependencyType.IMPORT,
+          specifier: importPath,
+          referenceKind: DependencyReferenceKind.STATIC_IMPORT,
+          resolvedBy: DependencyResolutionKind.RELATIVE,
+        });
+        break; // one connection per package
+      }
+    }
+  }
+
+  return dedupeDependencies(deps);
+}
+
+// ─── C / C++ ─────────────────────────────────────────────────────────────────
+// Handles: #include "local.h" (quotes = local, angle = system — skip system)
+function parseCCppDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // Only double-quote includes — angle brackets are system headers
+  const includeRegex = /^\s*#\s*include\s+"([^"]+)"/gm;
+  let match: RegExpExecArray | null;
+  while ((match = includeRegex.exec(content)) !== null) {
+    const includePath = match[1];
+    // Try relative to source file first, then workspace root
+    const candidates = [
+      normalizePath(`${sourceDir}/${includePath}`),
+      normalizePath(includePath),
+    ];
+    for (const candidate of candidates) {
+      const resolved = normalizedFileIds[candidate];
+      if (resolved && resolved !== fileId) {
+        deps.push({
+          sourceId: fileId,
+          targetId: resolved,
+          layer: DependencyLayer.DIRECT,
+          type: DependencyType.REFERENCE,
+          specifier: includePath,
+          referenceKind: DependencyReferenceKind.HTML_ATTRIBUTE, // closest analog
+          resolvedBy: DependencyResolutionKind.RELATIVE,
+        });
+        break;
+      }
+    }
+  }
+
+  return deps;
+}
+
+// ─── Ruby ────────────────────────────────────────────────────────────────────
+// Handles: require_relative 'file', require './file'
+// Skips gem requires (no leading ./)
+function parseRubyDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // require_relative 'path' — always local
+  const relativeRegex = /require_relative\s+['"]([^'"]+)['"]/g;
+  let match: RegExpExecArray | null;
+  while ((match = relativeRegex.exec(content)) !== null) {
+    const p = match[1];
+    const base = normalizePath(`${sourceDir}/${p}`);
+    const resolved = normalizedFileIds[base] ||
+      normalizedFileIds[base + '.rb'];
+    if (resolved && resolved !== fileId) {
+      deps.push({
+        sourceId: fileId,
+        targetId: resolved,
+        layer: DependencyLayer.DIRECT,
+        type: DependencyType.IMPORT,
+        specifier: p,
+        referenceKind: DependencyReferenceKind.COMMONJS_REQUIRE,
+        resolvedBy: DependencyResolutionKind.RELATIVE,
+      });
+    }
+  }
+
+  // require './path' or require '../path' — local requires
+  const requireRegex = /\brequire\s+['"](\.{1,2}\/[^'"]+)['"]/g;
+  while ((match = requireRegex.exec(content)) !== null) {
+    const p = match[1];
+    const base = normalizePath(`${sourceDir}/${p}`);
+    const resolved = normalizedFileIds[base] ||
+      normalizedFileIds[base + '.rb'];
+    if (resolved && resolved !== fileId) {
+      deps.push({
+        sourceId: fileId,
+        targetId: resolved,
+        layer: DependencyLayer.DIRECT,
+        type: DependencyType.IMPORT,
+        specifier: p,
+        referenceKind: DependencyReferenceKind.COMMONJS_REQUIRE,
+        resolvedBy: DependencyResolutionKind.RELATIVE,
+      });
+    }
+  }
+
+  return dedupeDependencies(deps);
+}
+
+// ─── PHP ─────────────────────────────────────────────────────────────────────
+// Handles: require, require_once, include, include_once
+function parsePhpDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  const phpRegex = /(?:require|include)(?:_once)?\s*\(?\s*['"]([^'"]+)['"]/g;
+  let match: RegExpExecArray | null;
+  while ((match = phpRegex.exec(content)) !== null) {
+    const p = match[1];
+    if (!p.startsWith('.') && !p.startsWith('/')) { continue; }
+    const base = p.startsWith('.')
+      ? normalizePath(`${sourceDir}/${p}`)
+      : normalizePath(p);
+    const resolved = normalizedFileIds[base];
+    if (resolved && resolved !== fileId) {
+      deps.push({
+        sourceId: fileId,
+        targetId: resolved,
+        layer: DependencyLayer.DIRECT,
+        type: DependencyType.IMPORT,
+        specifier: p,
+        referenceKind: DependencyReferenceKind.COMMONJS_REQUIRE,
+        resolvedBy: DependencyResolutionKind.RELATIVE,
+      });
+    }
+  }
+
+  return deps;
+}
+
+// ─── Swift ───────────────────────────────────────────────────────────────────
+// Swift imports are module-level — resolve to other .swift files in same dir
+// import ClassName — look for ClassName.swift in same directory
+function parseSwiftDependencies(
+  content: string,
+  fileId: string,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // Skip framework imports (UIKit, Foundation etc) — local files only
+  const importRegex = /^import\s+(\w+)$/gm;
+  const SYSTEM_FRAMEWORKS = new Set([
+    'UIKit', 'Foundation', 'SwiftUI', 'AppKit', 'Combine',
+    'CoreData', 'CoreLocation', 'MapKit', 'StoreKit', 'XCTest',
+  ]);
+
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(content)) !== null) {
+    const name = match[1];
+    if (SYSTEM_FRAMEWORKS.has(name)) { continue; }
+    // Look for Name.swift in same directory
+    const candidate = normalizePath(`${sourceDir}/${name}.swift`);
+    const resolved = normalizedFileIds[candidate];
+    if (resolved && resolved !== fileId) {
+      deps.push({
+        sourceId: fileId,
+        targetId: resolved,
+        layer: DependencyLayer.DIRECT,
+        type: DependencyType.IMPORT,
+        specifier: name,
+        referenceKind: DependencyReferenceKind.STATIC_IMPORT,
+        resolvedBy: DependencyResolutionKind.RELATIVE,
+      });
+    }
+  }
+
+  return deps;
+}
+
+// ─── Kotlin ──────────────────────────────────────────────────────────────────
+// Handles: import com.example.ClassName — same approach as Java
+function parseKotlinDependencies(
+  content: string,
+  fileId: string,
+  javaPackageIndex: Map<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  // Kotlin uses same import syntax as Java
+  const importRegex = /^\s*import\s+([\w.]+)(\.*)?\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(content)) !== null) {
+    const importPath = match[1];
+    const resolved = resolveJavaImport(importPath, javaPackageIndex);
+    if (resolved && resolved !== fileId) {
+      deps.push({
+        sourceId: fileId,
+        targetId: resolved,
+        layer: DependencyLayer.DIRECT,
+        type: DependencyType.IMPORT,
+        specifier: importPath,
+        referenceKind: DependencyReferenceKind.STATIC_IMPORT,
+        resolvedBy: DependencyResolutionKind.JAVA_PACKAGE,
+      });
+    }
+  }
+  return deps;
+}
+
+// ─── Vue ─────────────────────────────────────────────────────────────────────
+// Vue SFC: parse <script> block imports + component registration in template
+function parseVueDependencies(
+  content: string,
+  fileId: string,
+  settings: ResolutionSettings,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+
+  // Extract <script> and <script setup> blocks
+  const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+  if (scriptMatch) {
+    const scriptContent = scriptMatch[1];
+    deps.push(...parseWithRegexes(scriptContent, fileId, settings, normalizedFileIds));
+  }
+
+  // Also catch components referenced in <template> as PascalCase tags
+  // <MyComponent> → look for MyComponent.vue
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+  const templateMatch = content.match(/<template[^>]*>([\s\S]*?)<\/template>/);
+  if (templateMatch) {
+    const tagRegex = /<([A-Z][a-zA-Z0-9]+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = tagRegex.exec(templateMatch[1])) !== null) {
+      const componentName = match[1];
+      const candidates = [
+        `${sourceDir}/${componentName}.vue`,
+        `${sourceDir}/components/${componentName}.vue`,
+        `${sourceDir}/${componentName}/index.vue`,
+      ];
+      for (const c of candidates) {
+        const resolved = normalizedFileIds[normalizePath(c)];
+        if (resolved && resolved !== fileId) {
+          deps.push({
+            sourceId: fileId,
+            targetId: resolved,
+            layer: DependencyLayer.DIRECT,
+            type: DependencyType.REFERENCE,
+            specifier: componentName,
+            referenceKind: DependencyReferenceKind.HTML_ATTRIBUTE,
+            resolvedBy: DependencyResolutionKind.RELATIVE,
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return dedupeDependencies(deps);
+}
+
+// ─── Svelte ──────────────────────────────────────────────────────────────────
+// Svelte SFC: parse <script> imports + component tags in markup
+function parseSvelteDependencies(
+  content: string,
+  fileId: string,
+  settings: ResolutionSettings,
+  normalizedFileIds: Record<string, string>
+): CosmosDependency[] {
+  const deps: CosmosDependency[] = [];
+  const sourceDir = normalizePath(fileId).replace(/\/[^\/]+$/, '');
+
+  // Extract <script> block
+  const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+  if (scriptMatch) {
+    deps.push(...parseWithRegexes(scriptMatch[1], fileId, settings, normalizedFileIds));
+  }
+
+  // Svelte components: <ComponentName> tags (PascalCase)
+  const tagRegex = /<([A-Z][a-zA-Z0-9]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = tagRegex.exec(content)) !== null) {
+    const name = match[1];
+    const candidates = [
+      `${sourceDir}/${name}.svelte`,
+      `${sourceDir}/components/${name}.svelte`,
+    ];
+    for (const c of candidates) {
+      const resolved = normalizedFileIds[normalizePath(c)];
+      if (resolved && resolved !== fileId) {
+        deps.push({
+          sourceId: fileId,
+          targetId: resolved,
+          layer: DependencyLayer.DIRECT,
+          type: DependencyType.REFERENCE,
+          specifier: name,
+          referenceKind: DependencyReferenceKind.HTML_ATTRIBUTE,
+          resolvedBy: DependencyResolutionKind.RELATIVE,
+        });
+        break;
+      }
+    }
+  }
+
+  return dedupeDependencies(deps);
+}
+
 export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[] {
   const seen = new Set<string>();
   const unique: CosmosDependency[] = [];
@@ -957,6 +1341,57 @@ export async function parseDependencies(data: CosmosData, workspaceRootOverride?
           break;
         case 'java':
           fileDeps = parseJavaDependencies(content, fileId, javaPackageIndex);
+          break;
+
+        // Kotlin — same package index as Java
+        case 'kt':
+        case 'kts':
+          fileDeps = parseKotlinDependencies(content, fileId, javaPackageIndex);
+          break;
+
+        // Rust
+        case 'rs':
+          fileDeps = parseRustDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // Go
+        case 'go':
+          fileDeps = parseGoDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // C / C++
+        case 'c':
+        case 'cpp':
+        case 'cc':
+        case 'cxx':
+        case 'h':
+        case 'hpp':
+          fileDeps = parseCCppDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // Ruby
+        case 'rb':
+          fileDeps = parseRubyDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // PHP
+        case 'php':
+          fileDeps = parsePhpDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // Swift
+        case 'swift':
+          fileDeps = parseSwiftDependencies(content, fileId, normalizedFileIds);
+          break;
+
+        // Vue SFC
+        case 'vue':
+          fileDeps = parseVueDependencies(content, fileId, settings, normalizedFileIds);
+          break;
+
+        // Svelte SFC
+        case 'svelte':
+          fileDeps = parseSvelteDependencies(content, fileId, settings, normalizedFileIds);
           break;
       }
 
