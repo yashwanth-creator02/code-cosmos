@@ -22,8 +22,8 @@ export class Star {
     // - Leaf folders (no subtree) get BASE_SIZE — fixed minimum
     // - Size grows progressively with subtree using sqrt scaling
     // - No cap — the root star can be huge, camera adjusts
-    const BASE_SIZE = 5;        // fixed size for leaf folders
-    const SCALE_FACTOR = 1.2;   // how much each file in subtree adds
+    const BASE_SIZE = 5; // fixed size for leaf folders
+    const SCALE_FACTOR = 1.2; // how much each file in subtree adds
 
     const size = BASE_SIZE + Math.sqrt(subtreeFileCount) * SCALE_FACTOR;
 

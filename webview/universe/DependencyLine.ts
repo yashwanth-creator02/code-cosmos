@@ -21,13 +21,14 @@ export class DependencyLine {
 
     switch (dependency.layer) {
       case DependencyLayer.CIRCULAR:
-        color = new THREE.Color(0xFF1744);
+        color = new THREE.Color(0xff1744);
         opacity = 0.8;
         break;
       case DependencyLayer.DIRECT:
-        color = dependency.type === DependencyType.REFERENCE
-          ? new THREE.Color(0x7ee787)
-          : new THREE.Color(0xffffff);
+        color =
+          dependency.type === DependencyType.REFERENCE
+            ? new THREE.Color(0x7ee787)
+            : new THREE.Color(0xffffff);
         opacity = 0.6;
         break;
       case DependencyLayer.INDIRECT:
@@ -35,11 +36,11 @@ export class DependencyLine {
         opacity = 0.08;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENT:
-        color = new THREE.Color(0xFFB300);
+        color = new THREE.Color(0xffb300);
         opacity = 0.06;
         break;
       case DependencyLayer.LAYER3_SHARED_DEPENDENCY:
-        color = new THREE.Color(0x00BCD4);
+        color = new THREE.Color(0x00bcd4);
         opacity = 0.06;
         break;
       default:
@@ -53,14 +54,22 @@ export class DependencyLine {
     const geometry = new THREE.BufferGeometry();
 
     const positions = new Float32Array([
-      startPosition.x, startPosition.y, startPosition.z,
-      endPosition.x, endPosition.y, endPosition.z,
+      startPosition.x,
+      startPosition.y,
+      startPosition.z,
+      endPosition.x,
+      endPosition.y,
+      endPosition.z,
     ]);
 
     // Gradient: source bright, target dim — shows import direction
     const colors = new Float32Array([
-      color.r, color.g, color.b,
-      color.r * 0.15, color.g * 0.15, color.b * 0.15,
+      color.r,
+      color.g,
+      color.b,
+      color.r * 0.15,
+      color.g * 0.15,
+      color.b * 0.15,
     ]);
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));

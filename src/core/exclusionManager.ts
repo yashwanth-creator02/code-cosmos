@@ -2,19 +2,20 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Buffer } from 'buffer';
+import { minimatch } from 'minimatch';
+
 const SMART_DEFAULTS = [
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  'out',
-  '.next',
-  '__pycache__',
-  '.env',
-  'package-lock.json',
-  'yarn.lock',
-  'pnpm-lock.yaml',
+  '**/node_modules/**',
+  '**/.git/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/out/**',
+  '**/.next/**',
+  '**/__pycache__/**',
+  '**/.env',
+  '**/package-lock.json',
+  '**/yarn.lock',
+  '**/pnpm-lock.yaml',
 ];
 
 async function loadCosmosIgnore(workspaceRoot: string): Promise<string[]> {
@@ -25,7 +26,17 @@ async function loadCosmosIgnore(workspaceRoot: string): Promise<string[]> {
       .toString('utf8')
       .split('\n')
       .map((line: string) => line.trim())
-      .filter((line: string) => line && !line.startsWith('#'));
+      .filter((line: string) => line && !line.startsWith('#'))
+      .map((line) => {
+        // Ensure glob pattern works as expected
+        if (line.startsWith('/') || line.startsWith('./')) {
+          return line.replace(/^(\.\/|\/)/, '**/');
+        }
+        if (!line.includes('*') && !line.includes('/')) {
+          return `**/${line}/**`;
+        }
+        return line;
+      });
   } catch {
     return [];
   }
@@ -37,8 +48,10 @@ export async function buildExclusionList(workspaceRoot: string): Promise<string[
 }
 
 export function shouldExclude(filePath: string, exclusions: string[]): boolean {
-  const parts = filePath.split(/[\\/]/);
-  return exclusions.some(
-    (exclusion) => parts.some((part) => part === exclusion) || filePath.endsWith(exclusion)
+  // Normalize filePath to use forward slashes for minimatch
+  const normalizedPath = filePath.replace(/\\/g, '/');
+
+  return exclusions.some((pattern) =>
+    minimatch(normalizedPath, pattern, { dot: true, matchBase: true })
   );
 }

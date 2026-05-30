@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import pLimit from 'p-limit';
 import { CosmosData, CosmosFile, CosmosFolder, FileType, StarNode } from '../types';
 import { buildExclusionList, shouldExclude } from './exclusionManager';
 import { logger } from '../utils/logger';
@@ -14,29 +15,64 @@ import {
 } from './dependencyParser';
 import { readGitData } from './gitReader';
 
-
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
-    case 'ts': case 'tsx': return FileType.TS;
-    case 'js': case 'jsx': case 'mjs': case 'cjs': return FileType.JS;
-    case 'html': return FileType.HTML;
-    case 'css': case 'scss': case 'sass': return FileType.CSS;
-    case 'py': return FileType.PY;
-    case 'java': return FileType.JAVA;
+    case 'ts':
+    case 'tsx':
+      return FileType.TS;
+    case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
+      return FileType.JS;
+    case 'html':
+      return FileType.HTML;
+    case 'css':
+    case 'scss':
+    case 'sass':
+      return FileType.CSS;
+    case 'py':
+      return FileType.PY;
+    case 'java':
+      return FileType.JAVA;
     // New languages — map to closest existing FileType
-    case 'rs': return FileType.RUST;
-    case 'go': return FileType.GO;
-    case 'c': case 'cpp': case 'cc': case 'cxx': case 'h': case 'hpp': return FileType.CPP;
-    case 'rb': return FileType.RUBY;
-    case 'php': return FileType.PHP;
-    case 'swift': return FileType.SWIFT;
-    case 'kt': case 'kts': return FileType.KOTLIN;
-    case 'vue': return FileType.VUE;
-    case 'svelte': return FileType.SVELTE;
-    case 'png': case 'jpg': case 'jpeg': case 'gif':
-    case 'svg': case 'ico': case 'webp': case 'woff':
-    case 'woff2': case 'ttf': return FileType.ASSET;
-    default: return FileType.OTHER;
+    case 'rs':
+      return FileType.RUST;
+    case 'go':
+      return FileType.GO;
+    case 'c':
+    case 'cpp':
+    case 'cc':
+    case 'cxx':
+    case 'h':
+    case 'hpp':
+      return FileType.CPP;
+    case 'rb':
+      return FileType.RUBY;
+    case 'php':
+      return FileType.PHP;
+    case 'swift':
+      return FileType.SWIFT;
+    case 'kt':
+    case 'kts':
+      return FileType.KOTLIN;
+    case 'vue':
+      return FileType.VUE;
+    case 'svelte':
+      return FileType.SVELTE;
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'svg':
+    case 'ico':
+    case 'webp':
+    case 'woff':
+    case 'woff2':
+    case 'ttf':
+      return FileType.ASSET;
+    default:
+      return FileType.OTHER;
   }
 }
 
@@ -90,45 +126,54 @@ async function traverseDirectory(
     }
   }
 
-  for (const [name, fileType] of entries) {
-    const entryUri = vscode.Uri.joinPath(dirUri, name);
-    const entryRelative = normalizePath(path.relative(workspaceRoot, entryUri.fsPath));
+  const limit = pLimit(10);
+  const tasks = entries.map(([name, fileType]) => {
+    return limit(async () => {
+      const entryUri = vscode.Uri.joinPath(dirUri, name);
+      const entryRelative = normalizePath(path.relative(workspaceRoot, entryUri.fsPath));
 
-    if (shouldExclude(entryRelative, exclusions)) {
-      logger.log(`Excluding: ${entryRelative}`);
-      continue;
-    }
+      if (shouldExclude(entryRelative, exclusions)) {
+        logger.log(`Excluding: ${entryRelative}`);
+        return;
+      }
 
-    if (fileType === vscode.FileType.Directory) {
-      await traverseDirectory(entryUri, workspaceRoot, exclusions, data, folderId, visitedPaths);
-      continue;
-    }
+      if (fileType === vscode.FileType.Directory) {
+        await traverseDirectory(entryUri, workspaceRoot, exclusions, data, folderId, visitedPaths);
+        return;
+      }
 
-    if (fileType !== vscode.FileType.File) { continue; }
+      if (fileType !== vscode.FileType.File) {
+        return;
+      }
 
-    const extension = path.extname(name).replace(/^\./, '');
-    let stat: vscode.FileStat;
-    try {
-      stat = await vscode.workspace.fs.stat(entryUri);
-    } catch {
-      continue;
-    }
+      const extension = path.extname(name).replace(/^\./, '');
+      let stat: vscode.FileStat;
+      try {
+        stat = await vscode.workspace.fs.stat(entryUri);
+      } catch {
+        return;
+      }
 
-    const file: CosmosFile = {
-      id: entryRelative,
-      name,
-      path: entryUri.fsPath,
-      relativePath: entryRelative,
-      extension,
-      type: getFileType(extension),
-      size: stat.size,
-      folderId,
-    };
+      const file: CosmosFile = {
+        id: entryRelative,
+        name,
+        path: entryUri.fsPath,
+        relativePath: entryRelative,
+        extension,
+        type: getFileType(extension),
+        size: stat.size,
+        folderId,
+      };
 
-    data.files[entryRelative] = file;
-    data.folders[folderId].fileIds.push(entryRelative);
-    logger.log(`Found file: ${entryRelative}`);
-  }
+      data.files[entryRelative] = file;
+      // Note: pushing to shared array in parallel is safe in JS/TS as it's single-threaded,
+      // but we should be careful with order if it mattered (it doesn't here).
+      data.folders[folderId].fileIds.push(entryRelative);
+      logger.log(`Found file: ${entryRelative}`);
+    });
+  });
+
+  await Promise.all(tasks);
 }
 
 // Calculates orbital radius based on depth
@@ -167,12 +212,11 @@ function goldenAngleOffset(
   };
 }
 
-function countSubtreeFiles(
-  folderId: string,
-  folders: Record<string, CosmosFolder>
-): number {
+function countSubtreeFiles(folderId: string, folders: Record<string, CosmosFolder>): number {
   const folder = folders[folderId];
-  if (!folder) { return 0; }
+  if (!folder) {
+    return 0;
+  }
 
   const directFiles = folder.fileIds.length;
   const childFiles = folder.childFolderIds.reduce(
@@ -192,9 +236,10 @@ export function buildStarTree(
 ): StarNode {
   const radius = getRadiusForDepth(depth);
 
-  const position = depth === 0
-    ? { x: 0, y: 0, z: 0 }
-    : goldenAngleOffset(childIndex, totalChildren, radius, parentPosition);
+  const position =
+    depth === 0
+      ? { x: 0, y: 0, z: 0 }
+      : goldenAngleOffset(childIndex, totalChildren, radius, parentPosition);
 
   const subtreeFileCount = countSubtreeFiles(folderId, folders);
 
@@ -204,14 +249,7 @@ export function buildStarTree(
   }
 
   const childNodes = folder.childFolderIds.map((childId, i) =>
-    buildStarTree(
-      childId,
-      folders,
-      position,
-      depth + 1,
-      i,
-      folder.childFolderIds.length
-    )
+    buildStarTree(childId, folders, position, depth + 1, i, folder.childFolderIds.length)
   );
 
   return { folderId, position, depth, childNodes, subtreeFileCount };
@@ -248,14 +286,7 @@ export async function buildFileTree(
     offset,
   };
 
-  await traverseDirectory(
-    workspaceFolder.uri,
-    workspaceRoot,
-    exclusions,
-    data,
-    null,
-    new Set()
-  );
+  await traverseDirectory(workspaceFolder.uri, workspaceRoot, exclusions, data, null, new Set());
 
   logger.log('File tree complete. Parsing dependencies...');
   const directDeps = await parseDependencies(data, workspaceRoot);

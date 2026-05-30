@@ -18,9 +18,6 @@
       }
     ]
   },
-  "activationEvents": [
-    "onCommand:code-cosmos.openCosmos"
-  ],
   "scripts": {
     "vscode:prepublish": "npm run compile && npm run build:webview",
     "compile": "tsc -p ./",
@@ -29,7 +26,8 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "build:webview": "vite build",
-    "watch:webview": "vite build --watch"
+    "watch:webview": "vite build --watch",
+    "format": "prettier --write ."
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -49,6 +47,8 @@
     "vitest": "^4.1.6"
   },
   "dependencies": {
+    "minimatch": "^10.2.5",
+    "p-limit": "^3.1.0",
     "three": "^0.184.0"
   }
 }

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Star } from './Star';
-import { Planet } from './Planet';
+import { FILE_TYPE_COLORS } from './Planet';
 import { DependencyLine } from './DependencyLine';
 import { sendToExtension } from '../bridge/messageBridge';
 import {
@@ -12,38 +12,76 @@ import {
   DependencyLayer,
   DependencyType,
   CosmosData,
-  StarNode, SettingsState, DEFAULT_SETTINGS, GitData
+  StarNode,
+  SettingsState,
+  DEFAULT_SETTINGS,
+  GitData,
+  CosmosFile,
+  FileType,
 } from '../../src/types';
 
 const PRESETS = {
   clean: {
-    showDirectLines: true, showIndirectLines: false,
-    showLayer3Lines: false, showCircularLines: true,
-    enableAnimation: false, enableStarRotation: true,
+    showDirectLines: true,
+    showIndirectLines: false,
+    showLayer3Lines: false,
+    showCircularLines: true,
+    enableAnimation: false,
+    enableStarRotation: true,
     orbitalSpeed: 1.0,
-    showFolderLabels: true, showProximityLabels: true,
-    showBackgroundStars: true, enableFog: true, showLegend: true,
-    performanceMode: false, showMinimap: false,
+    showFolderLabels: true,
+    showProximityLabels: true,
+    showBackgroundStars: true,
+    enableFog: true,
+    showLegend: true,
+    performanceMode: false,
+    showMinimap: false,
+    showGitHeatmap: false,
   },
   full: {
-    showDirectLines: true, showIndirectLines: true,
-    showLayer3Lines: true, showCircularLines: true,
-    enableAnimation: true, enableStarRotation: true,
+    showDirectLines: true,
+    showIndirectLines: true,
+    showLayer3Lines: true,
+    showCircularLines: true,
+    enableAnimation: true,
+    enableStarRotation: true,
     orbitalSpeed: 1.0,
-    showFolderLabels: true, showProximityLabels: true,
-    showBackgroundStars: true, enableFog: true, showLegend: true,
-    performanceMode: false, showMinimap: true,
+    showFolderLabels: true,
+    showProximityLabels: true,
+    showBackgroundStars: true,
+    enableFog: true,
+    showLegend: true,
+    performanceMode: false,
+    showMinimap: true,
+    showGitHeatmap: true,
   },
   performance: {
-    showDirectLines: true, showIndirectLines: false,
-    showLayer3Lines: false, showCircularLines: true,
-    enableAnimation: false, enableStarRotation: false,
+    showDirectLines: true,
+    showIndirectLines: false,
+    showLayer3Lines: false,
+    showCircularLines: true,
+    enableAnimation: false,
+    enableStarRotation: false,
     orbitalSpeed: 1.0,
-    showFolderLabels: false, showProximityLabels: false,
-    showBackgroundStars: false, enableFog: false, showLegend: true,
-    performanceMode: true, showMinimap: false,
+    showFolderLabels: false,
+    showProximityLabels: false,
+    showBackgroundStars: false,
+    enableFog: false,
+    showLegend: true,
+    performanceMode: true,
+    showMinimap: false,
+    showGitHeatmap: false,
   },
 };
+
+interface PlanetData {
+  file: CosmosFile;
+  position: THREE.Vector3;
+  instanceIndex: number;
+  scale: number;
+  color: number;
+  visible: boolean;
+}
 
 export class Universe {
   private scene: THREE.Scene;
@@ -51,7 +89,9 @@ export class Universe {
   private renderer: THREE.WebGLRenderer;
   private controls: OrbitControls;
   private stars: Map<string, Star> = new Map();
-  private planets: Map<string, Planet> = new Map();
+  private planets: Map<string, PlanetData> = new Map();
+  private planetInstanceMesh: THREE.InstancedMesh | null = null;
+  private instanceToPlanet: Map<number, string> = new Map();
   private lines: DependencyLine[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -65,13 +105,16 @@ export class Universe {
   private keys: Record<string, boolean> = {};
   private pitch = 0;
   private yaw = 0;
-  private orbitalData: Map<string, {
-    starPosition: THREE.Vector3;
-    angle: number;
-    inclination: number;
-    speed: number;
-    radius: number;
-  }> = new Map();
+  private orbitalData: Map<
+    string,
+    {
+      starPosition: THREE.Vector3;
+      angle: number;
+      inclination: number;
+      speed: number;
+      radius: number;
+    }
+  > = new Map();
   private starLabels: THREE.Sprite[] = [];
   private planetLabels: Map<string, THREE.Sprite> = new Map();
   private readonly LABEL_SHOW_DISTANCE = 150;
@@ -79,14 +122,14 @@ export class Universe {
   private settings: SettingsState = { ...DEFAULT_SETTINGS };
   private backgroundStars: THREE.Points | null = null;
   private focusedStarId: string | null = null;
-  private visibleTypes: Set<string> = new Set(); // populated dynamically from repo data
+  private visibleTypes: Set<string> = new Set();
   private lastPerformanceMode = false;
   private gitData: GitData | null = null;
   private minimapCanvas: HTMLCanvasElement | null = null;
   private minimapCtx: CanvasRenderingContext2D | null = null;
   private minimapVisible = false;
-  private readonly MINIMAP_WORLD_SIZE = 1200; // world units shown in minimap
-
+  private readonly MINIMAP_WORLD_SIZE = 1200;
+  private uncommittedRings: Map<string, THREE.Mesh> = new Map();
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -102,7 +145,11 @@ export class Universe {
     this.camera.position.z = 1200;
     this.defaultCameraPosition = this.camera.position.clone();
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -135,9 +182,6 @@ export class Universe {
 
     window.addEventListener('resize', () => this.onResize(canvas));
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { this.exitFocusMode(); }
-    });
-    window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         this.exitFocusMode();
         this.exitStarFocusMode();
@@ -159,36 +203,27 @@ export class Universe {
 
   private disposeSceneObject(object: THREE.Object3D): void {
     this.scene.remove(object);
-
     const disposable = object as THREE.Object3D & {
       geometry?: THREE.BufferGeometry;
       material?: THREE.Material | THREE.Material[];
     };
-
-    if (disposable.geometry) {
-      disposable.geometry.dispose();
-    }
-
+    if (disposable.geometry) { disposable.geometry.dispose(); }
     const disposeMaterial = (material: THREE.Material): void => {
-      const materialWithMap = material as THREE.Material & { map?: THREE.Texture | null };
-      if (materialWithMap.map) {
-        materialWithMap.map.dispose();
-      }
+      const m = material as THREE.Material & { map?: THREE.Texture | null };
+      if (m.map) { m.map.dispose(); }
       material.dispose();
     };
-
-    if (Array.isArray(disposable.material)) {
-      disposable.material.forEach(disposeMaterial);
-    } else if (disposable.material) {
-      disposeMaterial(disposable.material);
-    }
+    if (Array.isArray(disposable.material)) { disposable.material.forEach(disposeMaterial); }
+    else if (disposable.material) { disposeMaterial(disposable.material); }
   }
 
   private isTextInputTarget(target: EventTarget | null): boolean {
-    return target instanceof HTMLInputElement ||
+    return (
+      target instanceof HTMLInputElement ||
       target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement ||
-      (target instanceof HTMLElement && target.isContentEditable);
+      (target instanceof HTMLElement && target.isContentEditable)
+    );
   }
 
   private escapeHtml(value: string): string {
@@ -199,14 +234,11 @@ export class Universe {
       '"': '&quot;',
       "'": '&#39;',
     };
-
     return value.replace(/[&<>"']/g, (char) => replacements[char]);
   }
 
   private getDirectoryLabel(relativePath: string, fileName: string): string {
-    return relativePath.endsWith(fileName)
-      ? relativePath.slice(0, -fileName.length)
-      : relativePath;
+    return relativePath.endsWith(fileName) ? relativePath.slice(0, -fileName.length) : relativePath;
   }
 
   public build(data: CosmosData): void {
@@ -216,55 +248,76 @@ export class Universe {
     this.focusedFileId = null;
 
     // Clear everything
-    this.stars.forEach(star => {
+    this.stars.forEach((star) => {
       this.disposeSceneObject(star.mesh);
       this.disposeSceneObject(star.light);
     });
-    this.planets.forEach(planet => this.disposeSceneObject(planet.mesh));
-    this.starLabels.forEach(label => this.disposeSceneObject(label));
-    this.lines.forEach(line => this.disposeSceneObject(line.line));
-    this.planetLabels.forEach(label => this.disposeSceneObject(label));
-    this.centralObjects.forEach(object => this.disposeSceneObject(object));
-    this.uncommittedRings.forEach(r => this.scene.remove(r));
+    if (this.planetInstanceMesh) {
+      this.disposeSceneObject(this.planetInstanceMesh);
+      this.planetInstanceMesh = null;
+    }
+    this.starLabels.forEach((label) => this.disposeSceneObject(label));
+    this.lines.forEach((line) => this.disposeSceneObject(line.line));
+    this.planetLabels.forEach((label) => this.disposeSceneObject(label));
+    this.centralObjects.forEach((object) => this.disposeSceneObject(object));
+    this.uncommittedRings.forEach((r) => this.scene.remove(r));
 
     this.stars.clear();
     this.planets.clear();
+    this.instanceToPlanet.clear();
     this.orbitalData.clear();
     this.starLabels = [];
     this.lines = [];
     this.planetLabels.clear();
     this.centralObjects = [];
     this.centralCore = null;
-    this.uncommittedRings.forEach(r => this.scene.remove(r));
     this.uncommittedRings.clear();
+
+    const fileCount = Object.keys(data.files).length;
+    const segments = this.settings.performanceMode ? 6 : 16;
+    const geometry = new THREE.SphereGeometry(2, segments, segments);
+    const material = new THREE.MeshStandardMaterial({
+      emissiveIntensity: 0.3,
+      transparent: true,
+    });
+    this.planetInstanceMesh = new THREE.InstancedMesh(geometry, material, fileCount);
+    this.planetInstanceMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(this.planetInstanceMesh);
 
     const rootFolder = data.folders[data.rootFolderId];
     this.addCentralBody(rootFolder);
 
-    // Walk the star tree recursively
+    let currentInstanceIndex = 0;
     if (data.starTree) {
-      data.starTree.childNodes.forEach(node => {
-        this.buildFromNode(node, data);
+      data.starTree.childNodes.forEach((node) => {
+        currentInstanceIndex = this.buildFromNode(node, data, currentInstanceIndex);
       });
     }
 
-    // Root files orbit the central sun directly
     if (rootFolder) {
       rootFolder.fileIds.forEach((fileId, planetIndex) => {
         const file = data.files[fileId];
-        if (!file) { return; }
-
+        if (!file) {
+          return;
+        }
         const { position, angle, inclination } = this.orbitalPosition(
           new THREE.Vector3(0, 0, 0),
           planetIndex,
           rootFolder.fileIds.length,
           80
         );
-
-        const planet = new Planet(file, position, this.settings.performanceMode);
-        this.planets.set(fileId, planet);
-        this.scene.add(planet.mesh);
-
+        const color = FILE_TYPE_COLORS[file.type] || 0x455a64;
+        const planetData: PlanetData = {
+          file,
+          position,
+          instanceIndex: currentInstanceIndex,
+          scale: 1,
+          color,
+          visible: true,
+        };
+        this.planets.set(fileId, planetData);
+        this.instanceToPlanet.set(currentInstanceIndex, fileId);
+        this.updateInstance(currentInstanceIndex, position, 1, color);
         this.orbitalData.set(fileId, {
           starPosition: new THREE.Vector3(0, 0, 0),
           angle,
@@ -272,8 +325,12 @@ export class Universe {
           speed: 0.0003 + Math.random() * 0.0001,
           radius: 80,
         });
+        currentInstanceIndex++;
       });
     }
+
+    this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
+    if (this.planetInstanceMesh.instanceColor) { this.planetInstanceMesh.instanceColor.needsUpdate = true; }
 
     this.drawDependencies(data.dependencies);
     this.populateFilterBar(data);
@@ -282,185 +339,67 @@ export class Universe {
     this.updateGitHud();
   }
 
-  private updateGitHud(): void {
-    const hud = document.getElementById('git-hud');
-    const branchSpan = document.getElementById('git-branch');
-    if (!hud || !branchSpan) { return; }
-
-    if (this.gitData?.available) {
-      hud.style.display = 'block';
-      branchSpan.textContent = this.gitData.branch;
-    } else {
-      hud.style.display = 'none';
-    }
+  private updateInstance(
+    index: number,
+    position: THREE.Vector3,
+    scale: number,
+    color: number
+  ): void {
+    if (!this.planetInstanceMesh) { return; }
+    const matrix = new THREE.Matrix4();
+    matrix.makeScale(scale, scale, scale);
+    matrix.setPosition(position);
+    this.planetInstanceMesh.setMatrixAt(index, matrix);
+    this.planetInstanceMesh.setColorAt(index, new THREE.Color(color));
   }
 
-  // Build filter buttons dynamically from file types actually present in repo
-  private populateFilterBar(data: CosmosData): void {
-    const container = document.getElementById('filter-buttons');
-    if (!container) { return; }
-
-    // Collect all unique extensions present in this repo
-    const typeInfo: Map<string, { color: string; label: string; count: number }> = new Map([
-      ['ts', { color: '#00D2FF', label: 'TypeScript', count: 0 }],
-      ['tsx', { color: '#00D2FF', label: 'TSX', count: 0 }],
-      ['js', { color: '#FFD700', label: 'JavaScript', count: 0 }],
-      ['jsx', { color: '#FFD700', label: 'JSX', count: 0 }],
-      ['mjs', { color: '#FFD700', label: 'MJS', count: 0 }],
-      ['html', { color: '#00E676', label: 'HTML', count: 0 }],
-      ['css', { color: '#E040FB', label: 'CSS', count: 0 }],
-      ['scss', { color: '#E040FB', label: 'SCSS', count: 0 }],
-      ['sass', { color: '#E040FB', label: 'Sass', count: 0 }],
-      ['py', { color: '#FF6D00', label: 'Python', count: 0 }],
-      ['java', { color: '#FF3D00', label: 'Java', count: 0 }],
-      ['json', { color: '#B0BEC5', label: 'JSON', count: 0 }],
-      ['md', { color: '#78909C', label: 'Markdown', count: 0 }],
-      ['svg', { color: '#90A4AE', label: 'SVG', count: 0 }],
-      ['png', { color: '#90A4AE', label: 'Images', count: 0 }],
-      ['jpg', { color: '#90A4AE', label: 'Images', count: 0 }],
-      ['jpeg', { color: '#90A4AE', label: 'Images', count: 0 }],
-      ['gif', { color: '#90A4AE', label: 'Images', count: 0 }],
-      ['webp', { color: '#90A4AE', label: 'Images', count: 0 }],
-      ['ico', { color: '#90A4AE', label: 'Icon', count: 0 }],
-      ['woff', { color: '#607D8B', label: 'Font', count: 0 }],
-      ['woff2', { color: '#607D8B', label: 'Font', count: 0 }],
-      ['ttf', { color: '#607D8B', label: 'Font', count: 0 }],
-    ]);
-
-    // Count each extension
-    const presentTypes = new Map<string, { color: string; label: string; count: number }>();
-    Object.values(data.files).forEach(file => {
-      const ext = file.extension.toLowerCase();
-      if (typeInfo.has(ext)) {
-        const info = typeInfo.get(ext)!;
-        if (!presentTypes.has(ext)) {
-          presentTypes.set(ext, { ...info });
-        }
-        presentTypes.get(ext)!.count++;
-      } else if (ext) {
-        // Unknown extension — show it anyway
-        if (!presentTypes.has(ext)) {
-          presentTypes.set(ext, { color: '#455A64', label: ext.toUpperCase(), count: 0 });
-        }
-        presentTypes.get(ext)!.count++;
-      }
-    });
-
-    // Sort by count descending
-    const sorted = [...presentTypes.entries()].sort((a, b) => b[1].count - a[1].count);
-
-    // Initialize visibleTypes with all present types
-    this.visibleTypes = new Set(sorted.map(([ext]) => ext));
-
-    // Rebuild filter buttons
-    container.innerHTML = '';
-    sorted.forEach(([ext, info]) => {
-      const btn = document.createElement('button');
-      btn.className = 'filter-btn';
-      btn.dataset.type = ext;
-      btn.style.cssText = `
-        display:flex;align-items:center;gap:8px;
-        background:rgba(255,255,255,0.15);
-        border:1px solid rgba(255,255,255,0.2);
-        color:white;padding:4px 10px;border-radius:4px;
-        cursor:pointer;font-size:11px;text-align:left;width:100%;
-        opacity:1;
-      `;
-      btn.innerHTML = `<span style="color:${info.color}">⬤</span> ${info.label} <span style="opacity:0.5;margin-left:auto">${info.count}</span>`;
-
-      btn.addEventListener('click', () => {
-        const isActive = this.visibleTypes.has(ext);
-        if (isActive) {
-          this.visibleTypes.delete(ext);
-          btn.style.background = 'rgba(255,255,255,0.03)';
-          btn.style.opacity = '0.4';
-        } else {
-          this.visibleTypes.add(ext);
-          btn.style.background = 'rgba(255,255,255,0.15)';
-          btn.style.opacity = '1';
-        }
-        this.applyFilter();
-      });
-
-      container.appendChild(btn);
-    });
-
-    // Wire All / None buttons
-    const allBtn = document.getElementById('filter-all');
-    const noneBtn = document.getElementById('filter-none');
-
-    if (allBtn) {
-      allBtn.onclick = () => {
-        sorted.forEach(([ext]) => this.visibleTypes.add(ext));
-        container.querySelectorAll('.filter-btn').forEach(b => {
-          (b as HTMLElement).style.background = 'rgba(255,255,255,0.15)';
-          (b as HTMLElement).style.opacity = '1';
-        });
-        this.applyFilter();
-      };
-    }
-    if (noneBtn) {
-      noneBtn.onclick = () => {
-        this.visibleTypes.clear();
-        container.querySelectorAll('.filter-btn').forEach(b => {
-          (b as HTMLElement).style.background = 'rgba(255,255,255,0.03)';
-          (b as HTMLElement).style.opacity = '0.4';
-        });
-        this.applyFilter();
-      };
-    }
-  }
-
-  private buildFromNode(node: StarNode, data: CosmosData): void {
+  private buildFromNode(node: StarNode, data: CosmosData, instanceIndex: number): number {
     const folder = data.folders[node.folderId];
-    if (!folder) { return; }
-    if (folder.fileIds.length === 0 && folder.childFolderIds.length === 0) { return; }
-
-    const starPosition = new THREE.Vector3(
-      node.position.x,
-      node.position.y,
-      node.position.z
+    if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) { return instanceIndex; }
+    const starPosition = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+    const star = new Star(
+      folder,
+      starPosition,
+      node.subtreeFileCount,
+      this.settings.performanceMode
     );
-
-    const star = new Star(folder, starPosition, node.subtreeFileCount, this.settings.performanceMode);
     star.mesh.userData = {
       type: 'star',
       id: node.folderId,
       name: folder.name,
-      subtreeFileCount: node.subtreeFileCount
+      subtreeFileCount: node.subtreeFileCount,
     };
     this.stars.set(node.folderId, star);
-    this.scene.add(star.light);
-    this.scene.add(star.mesh);
-
-    // Label scale shrinks with depth
+    this.scene.add(star.light, star.mesh);
     const labelScale = Math.max(40, 120 - node.depth * 15);
-    const labelYOffset = Math.max(12, 25 - node.depth * 3);
     const labelPosition = starPosition.clone();
-    labelPosition.y += labelYOffset;
+    labelPosition.y += Math.max(12, 25 - node.depth * 3);
     const label = this.createStarLabel(folder.name, labelPosition, labelScale);
     this.starLabels.push(label);
     this.scene.add(label);
-
-    // Files orbit their star in 3D (spherical distribution — close to star)
-    // Orbital radius: leaf folders get small radius, deeper = tighter
     const orbitalRadius = Math.max(20, 70 - node.depth * 10);
-
+    let nextIndex = instanceIndex;
     folder.fileIds.forEach((fileId, planetIndex) => {
       const file = data.files[fileId];
       if (!file) { return; }
-
       const { position, angle, inclination } = this.orbitalPosition(
         starPosition,
         planetIndex,
         folder.fileIds.length,
         orbitalRadius
       );
-
-      const planet = new Planet(file, position, this.settings.performanceMode);
-      this.planets.set(fileId, planet);
-      this.scene.add(planet.mesh);
-
+      const color = FILE_TYPE_COLORS[file.type] || 0x455a64;
+      const planetData: PlanetData = {
+        file,
+        position,
+        instanceIndex: nextIndex,
+        scale: 1,
+        color,
+        visible: true,
+      };
+      this.planets.set(fileId, planetData);
+      this.instanceToPlanet.set(nextIndex, fileId);
+      this.updateInstance(nextIndex, position, 1, color);
       this.orbitalData.set(fileId, {
         starPosition: starPosition.clone(),
         angle,
@@ -468,12 +407,12 @@ export class Universe {
         speed: 0.0002 + Math.random() * 0.0001,
         radius: orbitalRadius,
       });
+      nextIndex++;
     });
-
-    // Recurse into child folders (they orbit this star in 2D — handled by starTree positions)
-    node.childNodes.forEach(childNode => {
-      this.buildFromNode(childNode, data);
+    node.childNodes.forEach((childNode) => {
+      nextIndex = this.buildFromNode(childNode, data, nextIndex);
     });
+    return nextIndex;
   }
 
   private orbitalPosition(
@@ -485,13 +424,11 @@ export class Universe {
     const goldenAngle = Math.PI * (1 + Math.sqrt(5));
     const angle = index * goldenAngle;
     const inclination = Math.acos(1 - (2 * (index + 0.5)) / Math.max(total, 1));
-
     const position = new THREE.Vector3(
       starPosition.x + radius * Math.sin(inclination) * Math.cos(angle),
       starPosition.y + radius * Math.cos(inclination),
       starPosition.z + radius * Math.sin(inclination) * Math.sin(angle)
     );
-
     return { position, angle, inclination };
   }
 
@@ -504,35 +441,33 @@ export class Universe {
   private drawDependencies(dependencies: CosmosDependency[]): void {
     const MAX_LINES = 2000;
     let lineCount = 0;
-
-    // Draw in priority order: circular first, then direct, indirect, layer3
     const ordered = [...dependencies].sort((a, b) => {
       const priority = (l: DependencyLayer) => {
         switch (l) {
-          case DependencyLayer.CIRCULAR: return 0;
-          case DependencyLayer.DIRECT: return 1;
-          case DependencyLayer.INDIRECT: return 2;
-          default: return 3;
+          case DependencyLayer.CIRCULAR:
+            return 0;
+          case DependencyLayer.DIRECT:
+            return 1;
+          case DependencyLayer.INDIRECT:
+            return 2;
+          default:
+            return 3;
         }
       };
       return priority(a.layer) - priority(b.layer);
     });
 
-    ordered.forEach(dep => {
+    ordered.forEach((dep) => {
       if (lineCount >= MAX_LINES) { return; }
-
       const sourcePlanet = this.planets.get(dep.sourceId);
       const targetPlanet = this.planets.get(dep.targetId);
       if (!sourcePlanet || !targetPlanet) { return; }
-
-      // Skip layer3 on large repos for performance
       if (
         this.planets.size > 300 &&
         (dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
           dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY)
       ) { return; }
-
-      const line = new DependencyLine(dep, sourcePlanet.mesh.position, targetPlanet.mesh.position);
+      const line = new DependencyLine(dep, sourcePlanet.position, targetPlanet.position);
       this.lines.push(line);
       this.scene.add(line.line);
       lineCount++;
@@ -541,53 +476,54 @@ export class Universe {
 
   private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
     if (this.spacecraftMode) { return; }
-
     const rect = canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // Check planets first
-    const planetMeshes = Array.from(this.planets.values()).map(p => p.mesh);
-    const planetIntersects = this.raycaster.intersectObjects(planetMeshes);
-
-    if (planetIntersects.length > 0) {
-      const clicked = planetIntersects[0].object;
-      const fileId = clicked.userData.id as string;
-
-      // Exit star focus first if active
-      if (this.focusedStarId) { this.exitStarFocusMode(); }
-
-      if (this.focusedFileId === fileId) {
-        this.exitFocusMode();
-      } else {
-        this.enterFocusMode(fileId);
-        sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
+    if (this.planetInstanceMesh) {
+      const planetIntersects = this.raycaster.intersectObject(this.planetInstanceMesh);
+      if (planetIntersects.length > 0 && planetIntersects[0].instanceId !== undefined) {
+        const fileId = this.instanceToPlanet.get(planetIntersects[0].instanceId);
+        if (fileId) {
+          if (this.focusedStarId) { this.exitStarFocusMode(); }
+          if (this.focusedFileId === fileId) { this.exitFocusMode(); }
+          else {
+            this.enterFocusMode(fileId);
+            sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
+          }
+          return;
+        }
       }
-      return;
     }
 
-    // Check stars
-    const starMeshes = Array.from(this.stars.values()).map(s => s.mesh);
+    const starMeshes = Array.from(this.stars.values()).map((s) => s.mesh);
     const starIntersects = this.raycaster.intersectObjects(starMeshes);
-
     if (starIntersects.length > 0) {
-      const clicked = starIntersects[0].object;
-      const folderId = clicked.userData.id as string;
-
-      // Exit planet focus first if active
+      const folderId = starIntersects[0].object.userData.id as string;
       if (this.focusedFileId) { this.exitFocusMode(); }
-
-      if (this.focusedStarId === folderId) {
-        this.exitStarFocusMode();
-      } else {
-        this.enterStarFocusMode(folderId);
-      }
+      if (this.focusedStarId === folderId) { this.exitStarFocusMode(); }
+      else { this.enterStarFocusMode(folderId); }
       return;
     }
 
-    // Clicked empty space — do nothing, focus persists until Escape or exit button
+    const visibleLines = this.lines.filter((l) => l.line.visible).map((l) => l.line);
+    const lineIntersects = this.raycaster.intersectObjects(visibleLines);
+    if (lineIntersects.length > 0) {
+      const hitLine = lineIntersects[0].object;
+      const depLine = this.lines.find((l) => l.line === hitLine);
+      if (depLine && depLine.dependency.line !== undefined) {
+        sendToExtension({
+          type: 'OPEN_FILE',
+          payload: {
+            fileId: depLine.dependency.sourceId,
+            line: depLine.dependency.line,
+            character: depLine.dependency.character,
+          },
+        });
+        return;
+      }
+    }
   }
 
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
@@ -595,255 +531,186 @@ export class Universe {
     const rect = canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
     this.raycaster.setFromCamera(this.mouse, this.camera);
     const tooltip = document.getElementById('tooltip')!;
 
-    // Check planets and stars first — fast
-    const allMeshes = [
-      ...Array.from(this.planets.values()).map(p => p.mesh),
-      ...Array.from(this.stars.values()).map(s => s.mesh),
-    ];
-    if (this.centralCore) { allMeshes.push(this.centralCore); }
+    const intersectable: THREE.Object3D[] = [...Array.from(this.stars.values()).map((s) => s.mesh)];
+    if (this.planetInstanceMesh) { intersectable.push(this.planetInstanceMesh); }
+    if (this.centralCore) { intersectable.push(this.centralCore); }
 
-    const meshIntersects = this.raycaster.intersectObjects(allMeshes);
+    const intersects = this.raycaster.intersectObjects(intersectable);
+    if (intersects.length > 0) {
+      const hovered = intersects[0];
+      const object = hovered.object;
 
-    if (meshIntersects.length > 0) {
-      const hovered = meshIntersects[0].object;
-
-      if (hovered.userData.type === 'central') {
-        const rootName = this.escapeHtml(String(hovered.userData.name));
+      if (object.userData.type === 'central') {
+        const rootName = this.escapeHtml(String(object.userData.name));
         tooltip.style.display = 'block';
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
-        tooltip.innerHTML = `
-          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-gold);">⭐ ${rootName}</div>
-          <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Root Repository</div>
-          <div style="display:grid; grid-template-columns: 1fr auto; gap: 8px; font-size:11px;">
-            <span style="opacity:0.7;">Files</span><span style="font-weight:600;">${Object.keys(this.data!.files).length}</span>
-            <span style="opacity:0.7;">Folders</span><span style="font-weight:600;">${Object.keys(this.data!.folders).length}</span>
-          </div>
-        `;
+        tooltip.innerHTML = `<div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-gold);">⭐ ${rootName}</div><div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Root Repository</div><div style="display:grid; grid-template-columns: 1fr auto; gap: 8px; font-size:11px;"><span style="opacity:0.7;">Files</span><span style="font-weight:600;">${Object.keys(this.data!.files).length}</span><span style="opacity:0.7;">Folders</span><span style="font-weight:600;">${Object.keys(this.data!.folders).length}</span></div>`;
         return;
       }
 
-      if (hovered.userData.type === 'star') {
-        const folderId = hovered.userData.id as string;
+      if (object.userData.type === 'star') {
+        const folderId = object.userData.id as string;
         const folder = this.data!.folders[folderId];
         if (!folder) { return; }
-
         const folderFileIds = new Set(folder.fileIds);
         const outgoing = this.dependencies.filter(
-          d => folderFileIds.has(d.sourceId) && d.layer === DependencyLayer.DIRECT
+          (d) => folderFileIds.has(d.sourceId) && d.layer === DependencyLayer.DIRECT
         ).length;
         const incoming = this.dependencies.filter(
-          d => folderFileIds.has(d.targetId) && d.layer === DependencyLayer.DIRECT
+          (d) => folderFileIds.has(d.targetId) && d.layer === DependencyLayer.DIRECT
         ).length;
         const hasCircular = this.dependencies.some(
-          d => d.layer === DependencyLayer.CIRCULAR &&
+          (d) =>
+            d.layer === DependencyLayer.CIRCULAR &&
             (folderFileIds.has(d.sourceId) || folderFileIds.has(d.targetId))
         );
-
         tooltip.style.display = 'block';
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
-        tooltip.innerHTML = `
-          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-blue);">📁 ${this.escapeHtml(folder.name)}</div>
-          <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Directory</div>
-          <div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
-            <span style="opacity:0.7;">Files</span><span style="font-weight:600;">${folder.fileIds.length}</span>
-            <span style="opacity:0.7;">Subfolders</span><span style="font-weight:600;">${folder.childFolderIds.length}</span>
-            <span style="opacity:0.7;">Out / In</span><span style="font-weight:600;">${outgoing} / ${incoming}</span>
-          </div>
-          ${hasCircular ? '<div style="margin-top:8px; color:#FF1744; font-size:10px; font-weight:600; display:flex; align-items:center; gap:4px;">⚠️ Circular dependencies inside</div>' : ''}
-        `;
+        tooltip.innerHTML = `<div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-blue);">📁 ${this.escapeHtml(folder.name)}</div><div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Directory</div><div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;"><span style="opacity:0.7;">Files</span><span style="font-weight:600;">${folder.fileIds.length}</span><span style="opacity:0.7;">Subfolders</span><span style="font-weight:600;">${folder.childFolderIds.length}</span><span style="opacity:0.7;">Out / In</span><span style="font-weight:600;">${outgoing} / ${incoming}</span></div>${hasCircular ? '<div style="margin-top:8px; color:#FF1744; font-size:10px; font-weight:600; display:flex; align-items:center; gap:4px;">⚠️ Circular dependencies inside</div>' : ''}`;
         return;
       }
 
-      // Planet hover
-      const hoveredFileId = hovered.userData.id as string;
-      const file = this.data?.files[hoveredFileId];
-      if (!file) { return; }
-
-      const dependsOn = this.dependencies.filter(
-        d => d.sourceId === hoveredFileId && d.layer === DependencyLayer.DIRECT
-      ).length;
-      const dependedBy = this.dependencies.filter(
-        d => d.targetId === hoveredFileId && d.layer === DependencyLayer.DIRECT
-      ).length;
-      const indirectCount = this.dependencies.filter(
-        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
-          && d.layer === DependencyLayer.INDIRECT
-      ).length;
-      const isCircular = this.dependencies.some(
-        d => d.layer === DependencyLayer.CIRCULAR &&
-          (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
-      );
-      const sharedDependentCount = this.dependencies.filter(
-        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
-          && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT
-      ).length;
-      const sharedDependencyCount = this.dependencies.filter(
-        d => (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
-          && d.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY
-      ).length;
-
-      // Git info
-      let gitHtml = '';
-      if (this.gitData?.available) {
-        const cleanId = hoveredFileId.includes(':')
-          ? hoveredFileId.split(':').slice(1).join(':')
-          : hoveredFileId;
-        const info = this.gitData.fileInfo[cleanId];
-        if (info) {
-          const recency = info.daysSinceLastChange === 999
-            ? 'Never'
-            : info.daysSinceLastChange === 0
-              ? 'Today'
-              : `${info.daysSinceLastChange}d ago`;
-
-          gitHtml = `
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.1); display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
-              <span style="opacity:0.6;">Commits</span><span style="font-weight:600; color:var(--accent-gold);">${info.commitCount}</span>
-              <span style="opacity:0.6;">Last Change</span><span style="font-weight:600;">${recency}</span>
-              ${info.hasUncommittedChanges ? '<span colspan="2" style="color:#FF8C00; font-size:10px; font-weight:600; margin-top:4px;">● Uncommitted changes</span>' : ''}
-            </div>
-          `;
+      if (object === this.planetInstanceMesh && hovered.instanceId !== undefined) {
+        const hoveredFileId = this.instanceToPlanet.get(hovered.instanceId);
+        const file = hoveredFileId ? this.data?.files[hoveredFileId] : null;
+        if (!file) { return; }
+        const dependsOn = this.dependencies.filter(
+          (d) => d.sourceId === hoveredFileId && d.layer === DependencyLayer.DIRECT
+        ).length;
+        const dependedBy = this.dependencies.filter(
+          (d) => d.targetId === hoveredFileId && d.layer === DependencyLayer.DIRECT
+        ).length;
+        const indirectCount = this.dependencies.filter(
+          (d) =>
+            (d.sourceId === hoveredFileId || d.targetId === hoveredFileId) &&
+            d.layer === DependencyLayer.INDIRECT
+        ).length;
+        const isCircular = this.dependencies.some(
+          (d) =>
+            d.layer === DependencyLayer.CIRCULAR &&
+            (d.sourceId === hoveredFileId || d.targetId === hoveredFileId)
+        );
+        let gitHtml = '';
+        if (this.gitData?.available) {
+          const cleanId = hoveredFileId!.includes(':')
+            ? hoveredFileId!.split(':').slice(1).join(':')
+            : hoveredFileId!;
+          const info = this.gitData.fileInfo[cleanId];
+          if (info) {
+            const recency =
+              info.daysSinceLastChange === 999
+                ? 'Never'
+                : info.daysSinceLastChange === 0
+                  ? 'Today'
+                  : `${info.daysSinceLastChange}d ago`;
+            gitHtml = `<div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.1); display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;"><span style="opacity:0.6;">Commits</span><span style="font-weight:600; color:var(--accent-gold);">${info.commitCount}</span><span style="opacity:0.6;">Last Change</span><span style="font-weight:600;">${recency}</span>${info.hasUncommittedChanges ? '<span colspan="2" style="color:#FF8C00; font-size:10px; font-weight:600; margin-top:4px;">● Uncommitted changes</span>' : ''}</div>`;
+          }
         }
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${event.clientX + 15}px`;
+        tooltip.style.top = `${event.clientY + 15}px`;
+        tooltip.innerHTML = `<div style="font-weight:700; font-size:14px; margin-bottom:4px;">${this.escapeHtml(file.name)}</div><div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">${this.escapeHtml(file.extension.toUpperCase())} File</div><div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;"><span style="opacity:0.7;">Direct Deps</span><span style="font-weight:600;">${dependsOn} out / ${dependedBy} in</span><span style="opacity:0.7;">Indirect Chains</span><span style="font-weight:600;">${indirectCount}</span>${isCircular ? '<span colspan="2" style="color:#FF1744; font-size:10px; font-weight:600; margin-top:4px;">⚠️ Part of circular chain</span>' : ''}</div>${gitHtml}`;
+        return;
       }
-
-      tooltip.style.display = 'block';
-      tooltip.style.left = `${event.clientX + 15}px`;
-      tooltip.style.top = `${event.clientY + 15}px`;
-      tooltip.innerHTML = `
-        <div style="font-weight:700; font-size:14px; margin-bottom:4px;">${this.escapeHtml(file.name)}</div>
-        <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">${this.escapeHtml(file.extension.toUpperCase())} File</div>
-        <div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
-          <span style="opacity:0.7;">Direct Deps</span><span style="font-weight:600;">${dependsOn} out / ${dependedBy} in</span>
-          <span style="opacity:0.7;">Indirect Chains</span><span style="font-weight:600;">${indirectCount}</span>
-          ${isCircular ? '<span colspan="2" style="color:#FF1744; font-size:10px; font-weight:600; margin-top:4px;">⚠️ Part of circular chain</span>' : ''}
-        </div>
-        ${gitHtml}
-      `;
-      return;
     }
 
-    // Throttle line raycasting to 50ms
     if (now - this.lastMouseMoveTime < 50) {
       tooltip.style.display = 'none';
       return;
     }
     this.lastMouseMoveTime = now;
-
-    const lineMeshes = this.lines.filter(l => l.line.visible).map(l => l.line);
+    const lineMeshes = this.lines.filter((l) => l.line.visible).map((l) => l.line);
     const lineIntersects = this.raycaster.intersectObjects(lineMeshes);
-
     if (lineIntersects.length > 0) {
       const hitLine = lineIntersects[0].object;
-      const depLine = this.lines.find(l => l.line === hitLine);
-      if (!depLine) { tooltip.style.display = 'none'; return; }
-
+      const depLine = this.lines.find((l) => l.line === hitLine);
+      if (!depLine) {
+        tooltip.style.display = 'none';
+        return;
+      }
       const sourceFile = this.data?.files[depLine.dependency.sourceId];
       const targetFile = this.data?.files[depLine.dependency.targetId];
-      if (!sourceFile || !targetFile) { tooltip.style.display = 'none'; return; }
-
+      if (!sourceFile || !targetFile) {
+        tooltip.style.display = 'none';
+        return;
+      }
       const layerInfo = this.getLayerInfo(depLine.dependency.layer);
-
       tooltip.style.display = 'block';
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
-      tooltip.innerHTML = `
-        <span style="color:${layerInfo.color}">⬤ ${this.escapeHtml(layerInfo.label)}</span><br>
-        <strong>From:</strong> ${this.escapeHtml(sourceFile.name)}<br>
-        <span style="opacity:0.5;font-size:10px">${this.escapeHtml(sourceFile.relativePath)}</span><br>
-        <strong>To:</strong> ${this.escapeHtml(targetFile.name)}<br>
-        <span style="opacity:0.5;font-size:10px">${this.escapeHtml(targetFile.relativePath)}</span>
-      `;
-    } else {
-      tooltip.style.display = 'none';
-    }
+      tooltip.innerHTML = `<span style="color:${layerInfo.color}">⬤ ${this.escapeHtml(layerInfo.label)}</span><br><strong>From:</strong> ${this.escapeHtml(sourceFile.name)}<br><span style="opacity:0.5;font-size:10px">${this.escapeHtml(sourceFile.relativePath)}</span><br><strong>To:</strong> ${this.escapeHtml(targetFile.name)}<br><span style="opacity:0.5;font-size:10px">${this.escapeHtml(targetFile.relativePath)}</span>`;
+    } else { tooltip.style.display = 'none'; }
   }
 
   private getLayerInfo(layer: DependencyLayer): { label: string; color: string } {
     switch (layer) {
-      case DependencyLayer.DIRECT: return { label: 'Direct import', color: '#ffffff' };
-      case DependencyLayer.INDIRECT: return { label: 'Indirect chain', color: '#4488ff' };
-      case DependencyLayer.CIRCULAR: return { label: 'Circular dependency', color: '#FF1744' };
-      case DependencyLayer.LAYER3_SHARED_DEPENDENT: return { label: 'Shared dependent', color: '#FFB300' };
-      case DependencyLayer.LAYER3_SHARED_DEPENDENCY: return { label: 'Shared dependency', color: '#00BCD4' };
-      default: return { label: 'Unknown', color: '#ffffff' };
+      case DependencyLayer.DIRECT:
+        return { label: 'Direct import', color: '#ffffff' };
+      case DependencyLayer.INDIRECT:
+        return { label: 'Indirect chain', color: '#4488ff' };
+      case DependencyLayer.CIRCULAR:
+        return { label: 'Circular dependency', color: '#FF1744' };
+      case DependencyLayer.LAYER3_SHARED_DEPENDENT:
+        return { label: 'Shared dependent', color: '#FFB300' };
+      case DependencyLayer.LAYER3_SHARED_DEPENDENCY:
+        return { label: 'Shared dependency', color: '#00BCD4' };
+      default:
+        return { label: 'Unknown', color: '#ffffff' };
     }
   }
 
   private enterFocusMode(fileId: string): void {
     this.focusedFileId = fileId;
-
-    const connectedIds = new Set<string>();
-    connectedIds.add(fileId);
-
-    this.dependencies.forEach(dep => {
+    const connectedIds = new Set<string>([fileId]);
+    this.dependencies.forEach((dep) => {
       if (dep.sourceId === fileId) { connectedIds.add(dep.targetId); }
       if (dep.targetId === fileId) { connectedIds.add(dep.sourceId); }
     });
 
     this.planets.forEach((planet, id) => {
-      const material = planet.mesh.material as THREE.MeshStandardMaterial;
-      if (connectedIds.has(id)) {
-        material.opacity = 1;
-        material.transparent = false;
-      } else {
-        material.opacity = 0.05;
-        material.transparent = true;
-      }
+      const isConnected = connectedIds.has(id);
+      const color = new THREE.Color(planet.color);
+      if (!isConnected) { color.multiplyScalar(0.1); }
+      this.planetInstanceMesh!.setColorAt(planet.instanceIndex, color);
     });
+    this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
 
-    this.stars.forEach(star => {
-      const material = star.mesh.material as THREE.MeshStandardMaterial;
-      material.opacity = 0.05;
-      material.transparent = true;
+    this.stars.forEach((star) => {
+      (star.mesh.material as THREE.MeshStandardMaterial).opacity = 0.05;
+      (star.mesh.material as THREE.MeshStandardMaterial).transparent = true;
     });
-
-    this.starLabels.forEach(label => {
+    this.starLabels.forEach((label) => {
       (label.material as THREE.SpriteMaterial).opacity = 0.05;
     });
-
-    this.lines.forEach(depLine => {
+    this.lines.forEach((depLine) => {
       const isConnected =
-        depLine.dependency.sourceId === fileId ||
-        depLine.dependency.targetId === fileId;
-      // Use visible=false so lines truly disappear — not opacity (which turns black with vertexColors)
+        depLine.dependency.sourceId === fileId || depLine.dependency.targetId === fileId;
       depLine.line.visible = isConnected;
-      const material = depLine.line.material as THREE.LineBasicMaterial;
-      if (isConnected) { material.opacity = 0.9; }
+      if (isConnected) { (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9; }
     });
   }
 
   private exitFocusMode(): void {
     this.focusedFileId = null;
-
-    this.planets.forEach(planet => {
-      const material = planet.mesh.material as THREE.MeshStandardMaterial;
-      material.opacity = 1;
-      material.transparent = false;
+    this.planets.forEach((planet) => {
+      this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
-
-    this.stars.forEach(star => {
-      const material = star.mesh.material as THREE.MeshStandardMaterial;
-      material.opacity = 1;
-      material.transparent = false;
+    this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
+    this.stars.forEach((star) => {
+      (star.mesh.material as THREE.MeshStandardMaterial).opacity = 1;
+      (star.mesh.material as THREE.MeshStandardMaterial).transparent = false;
     });
-
-    this.starLabels.forEach(label => {
+    this.starLabels.forEach((label) => {
       (label.material as THREE.SpriteMaterial).opacity = 1;
     });
-
-    this.lines.forEach(depLine => {
-      const material = depLine.line.material as THREE.LineBasicMaterial;
-      material.opacity = depLine.baseOpacity;
-      material.transparent = true;
+    this.lines.forEach((depLine) => {
+      (depLine.line.material as THREE.LineBasicMaterial).opacity = depLine.baseOpacity;
     });
-    // Re-apply settings — this correctly restores line visibility per user settings
-    // This handles both "show/hide by layer" toggles AND the exit from focus mode
     this.applySettingsToScene();
     this.applyGitVisuals();
   }
@@ -852,83 +719,58 @@ export class Universe {
     const container = document.getElementById('search-container')!;
     const input = document.getElementById('search-input') as HTMLInputElement;
     const results = document.getElementById('search-results')!;
-
     window.addEventListener('keydown', (e) => {
       const isTyping = this.isTextInputTarget(e.target);
-      if (isTyping && e.key !== 'Escape') {
-        return;
-      }
-
+      if (isTyping && e.key !== 'Escape') { return; }
       if ((e.ctrlKey && e.key === 'f') || e.key === '/') {
         e.preventDefault();
-        const isVisible = container.style.display === 'block';
-        container.style.display = isVisible ? 'none' : 'block';
-        if (!isVisible) {
-          input.focus();
-        }
+        container.style.display = container.style.display === 'block' ? 'none' : 'block';
+        if (container.style.display === 'block') { input.focus(); }
       }
-
-      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !isTyping) {
-        this.exportImage();
-      }
-
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !isTyping) { this.exportImage(); }
       if (e.key === 'Escape') {
         container.style.display = 'none';
         const sp = document.getElementById('shortcuts-panel');
         if (sp) { sp.style.display = 'none'; }
         this.exitFocusMode();
       }
-
       if ((e.key === 'r' || e.key === 'R') && !isTyping) { this.resetCamera(); }
-
       if (e.key === '?' && !isTyping) {
         const panel = document.getElementById('shortcuts-panel')!;
         panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
       }
-
-      if ((e.key === 's' || e.key === 'S') && !isTyping) {
-        if (!e.ctrlKey) {
-          const sp = document.getElementById('settings-panel')!;
-          sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
-        }
+      if ((e.key === 's' || e.key === 'S') && !isTyping && !e.ctrlKey) {
+        const sp = document.getElementById('settings-panel')!;
+        sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
       }
-
       if ((e.ctrlKey && (e.key === 'u' || e.key === 'U')) || e.key === 'F5') {
         e.preventDefault();
         sendToExtension({ type: 'REFRESH' });
       }
     });
-
     input.addEventListener('input', () => {
       const query = input.value.trim().toLowerCase();
-      if (!query || !this.data) { results.style.display = 'none'; return; }
-
+      if (!query || !this.data) {
+        results.style.display = 'none';
+        return;
+      }
       const matches = Object.values(this.data.files)
-        .filter(f => f.name.toLowerCase().includes(query))
+        .filter((f) => f.name.toLowerCase().includes(query))
         .slice(0, 8);
-
-      if (matches.length === 0) { results.style.display = 'none'; return; }
-
+      if (matches.length === 0) {
+        results.style.display = 'none';
+        return;
+      }
       results.style.display = 'block';
-      results.innerHTML = matches.map(f => {
-        const directoryLabel = this.getDirectoryLabel(f.relativePath, f.name);
-        return `
-          <div class="search-result" data-id="${this.escapeHtml(f.id)}" style="
-            padding: 10px 16px; color: white; font-family: sans-serif;
-            font-size: 13px; cursor: pointer;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            transition: background 0.2s;
-          ">
-            <div style="font-weight:600; color:var(--accent-blue);">${this.escapeHtml(f.name)}</div>
-            <div style="font-size:10px; opacity:0.4; margin-top:2px;">${this.escapeHtml(directoryLabel)}</div>
-          </div>
-        `;
-      }).join('');
-
-      results.querySelectorAll('.search-result').forEach(el => {
+      results.innerHTML = matches
+        .map(
+          (f) =>
+            `<div class="search-result" data-id="${this.escapeHtml(f.id)}" style="padding: 10px 16px; color: white; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);"><div style="font-weight:600; color:var(--accent-blue);">${this.escapeHtml(f.name)}</div><div style="font-size:10px; opacity:0.4;">${this.escapeHtml(this.getDirectoryLabel(f.relativePath, f.name))}</div></div>`
+        )
+        .join('');
+      results.querySelectorAll('.search-result').forEach((el) => {
         el.addEventListener('click', () => {
-          const fileId = (el as HTMLElement).dataset.id!;
-          this.flyToPlanet(fileId);
+          this.flyToPlanet((el as HTMLElement).dataset.id!);
           container.style.display = 'none';
         });
         el.addEventListener('mouseenter', () => {
@@ -941,18 +783,20 @@ export class Universe {
     });
   }
 
-  private flyToPlanet(fileId: string): void {
+  public focusOnFile(fileId: string): void {
+    if (this.focusedFileId === fileId) { return; }
+    this.flyToPlanet(fileId);
+  }
+
+  public flyToPlanet(fileId: string): void {
     const planet = this.planets.get(fileId);
     if (!planet) { return; }
-
-    const target = planet.mesh.position.clone();
+    const target = planet.position.clone();
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     const endPosition = target.clone().add(new THREE.Vector3(0, 0, 100));
-
     let progress = 0;
     const duration = 60;
-
     const fly = () => {
       if (progress >= duration) {
         this.controls.target.copy(target);
@@ -968,22 +812,18 @@ export class Universe {
       this.controls.update();
       requestAnimationFrame(fly);
     };
-
     fly();
   }
 
   private flyToStar(folderId: string): void {
     const star = this.stars.get(folderId);
     if (!star) { return; }
-
     const target = star.mesh.position.clone();
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     const endPosition = target.clone().add(new THREE.Vector3(0, 0, 250));
-
     let progress = 0;
     const duration = 60;
-
     const fly = () => {
       if (progress >= duration) {
         this.controls.target.copy(target);
@@ -998,13 +838,11 @@ export class Universe {
       this.controls.update();
       requestAnimationFrame(fly);
     };
-
     fly();
   }
 
   private initResetButton(): void {
-    const button = document.getElementById('reset-camera')!;
-    button.addEventListener('click', () => this.resetCamera());
+    document.getElementById('reset-camera')!.addEventListener('click', () => this.resetCamera());
   }
 
   public resetCamera(): void {
@@ -1012,10 +850,8 @@ export class Universe {
     const startTarget = this.controls.target.clone();
     const endPosition = this.defaultCameraPosition.clone();
     const endTarget = new THREE.Vector3(0, 0, 0);
-
     let progress = 0;
     const duration = 60;
-
     const reset = () => {
       if (progress >= duration) {
         this.controls.target.copy(endTarget);
@@ -1031,71 +867,71 @@ export class Universe {
       this.controls.update();
       requestAnimationFrame(reset);
     };
-
     reset();
   }
 
   private addBackgroundStars(): void {
-    if (this.backgroundStars) {
-      this.scene.remove(this.backgroundStars);
-      this.backgroundStars = null;
-    }
-
+    if (this.backgroundStars) { this.scene.remove(this.backgroundStars); }
     const count = this.settings.performanceMode ? 300 : 2000;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count * 3; i++) {
-      positions[i] = (Math.random() - 0.5) * 10000;
-    }
+    for (let i = 0; i < count * 3; i++) { positions[i] = (Math.random() - 0.5) * 10000; }
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const material = new THREE.PointsMaterial({
-      color: 0xffffff, size: 1.5, transparent: true, opacity: 0.6,
+      color: 0xffffff,
+      size: 1.5,
+      transparent: true,
+      opacity: 0.6,
     });
-    const stars = new THREE.Points(geometry, material);
-    this.backgroundStars = stars;
-    this.scene.add(stars);
+    this.backgroundStars = new THREE.Points(geometry, material);
+    this.scene.add(this.backgroundStars);
   }
 
   private addCentralBody(rootFolder: CosmosFolder | undefined): void {
-    if (!rootFolder) {
-      console.error('[Code Cosmos] Root folder not found');
-      return;
-    }
-
-    const coreGeometry = new THREE.SphereGeometry(40, 32, 32);
-    const coreMaterial = new THREE.MeshStandardMaterial({
-      color: 0xfff5c0, emissive: 0xffaa00, emissiveIntensity: 0.8,
-      transparent: true, opacity: 0.95,
-    });
-    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    if (!rootFolder) { return; }
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(40, 32, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0xfff5c0,
+        emissive: 0xffaa00,
+        emissiveIntensity: 0.8,
+        transparent: true,
+        opacity: 0.95,
+      })
+    );
     core.userData = { type: 'central', name: rootFolder.name };
     this.centralCore = core;
     this.centralObjects.push(core);
     this.scene.add(core);
-
-    const glowGeo = new THREE.SphereGeometry(55, 32, 32);
-    const glowMat = new THREE.MeshStandardMaterial({
-      color: 0xff8800, emissive: 0xff6600, emissiveIntensity: 0.4,
-      transparent: true, opacity: 0.15, side: THREE.BackSide,
-    });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(55, 32, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0xff8800,
+        emissive: 0xff6600,
+        emissiveIntensity: 0.4,
+        transparent: true,
+        opacity: 0.15,
+        side: THREE.BackSide,
+      })
+    );
     this.centralObjects.push(glow);
     this.scene.add(glow);
-
-    const outerGeo = new THREE.SphereGeometry(75, 32, 32);
-    const outerMat = new THREE.MeshStandardMaterial({
-      color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 0.2,
-      transparent: true, opacity: 0.06, side: THREE.BackSide,
-    });
-    const outerGlow = new THREE.Mesh(outerGeo, outerMat);
+    const outerGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(75, 32, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0xff4400,
+        emissive: 0xff2200,
+        emissiveIntensity: 0.2,
+        transparent: true,
+        opacity: 0.06,
+        side: THREE.BackSide,
+      })
+    );
     this.centralObjects.push(outerGlow);
     this.scene.add(outerGlow);
-
     const centralLight = new THREE.PointLight(0xffaa44, 2, 5000);
-    centralLight.position.set(0, 0, 0);
     this.centralObjects.push(centralLight);
     this.scene.add(centralLight);
-
     const label = this.createStarLabel(`⭐ ${rootFolder.name}`, new THREE.Vector3(0, 60, 0), 140);
     this.starLabels.push(label);
     this.scene.add(label);
@@ -1110,7 +946,6 @@ export class Universe {
     canvas.width = 256;
     canvas.height = 64;
     const ctx = canvas.getContext('2d')!;
-
     ctx.fillStyle = 'rgba(0,0,0,0)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
@@ -1120,13 +955,14 @@ export class Universe {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(name, canvas.width / 2, canvas.height / 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({
-      map: texture, transparent: true, depthWrite: false, depthTest: false,
-    });
-
-    const sprite = new THREE.Sprite(material);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(canvas),
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+      })
+    );
     sprite.position.copy(position);
     sprite.scale.set(scaleWidth, scaleWidth / 4, 1);
     sprite.userData = { type: 'label' };
@@ -1135,46 +971,32 @@ export class Universe {
 
   private initSpacecraftMode(): void {
     window.addEventListener('keydown', (e) => {
-      if (this.isTextInputTarget(e.target)) {
-        return;
-      }
-
-      this.keys[e.key.toLowerCase()] = true;
-      if (e.key === 'f' && !e.ctrlKey) {
-        this.spacecraftMode = !this.spacecraftMode;
-        this.controls.enabled = !this.spacecraftMode;
-        this.showModeIndicator(this.spacecraftMode);
+      if (!this.isTextInputTarget(e.target)) {
+        this.keys[e.key.toLowerCase()] = true;
+        if (e.key === 'f' && !e.ctrlKey) {
+          this.spacecraftMode = !this.spacecraftMode;
+          this.controls.enabled = !this.spacecraftMode;
+          this.showModeIndicator(this.spacecraftMode);
+        }
       }
     });
-
     window.addEventListener('keyup', (e) => {
       this.keys[e.key.toLowerCase()] = false;
     });
-
     this.renderer.domElement.addEventListener('click', () => {
-      if (this.spacecraftMode) {
-        this.renderer.domElement.requestPointerLock();
-      }
+      if (this.spacecraftMode) { this.renderer.domElement.requestPointerLock(); }
     });
-
     document.addEventListener('mousemove', (e) => {
-      if (!this.spacecraftMode) { return; }
-      if (document.pointerLockElement !== this.renderer.domElement) { return; }
-
-      const sensitivity = 0.001;
-      this.yaw -= e.movementX * sensitivity;
-      this.pitch -= e.movementY * sensitivity;
+      if (!this.spacecraftMode || document.pointerLockElement !== this.renderer.domElement) { return; }
+      this.yaw -= e.movementX * 0.001;
+      this.pitch -= e.movementY * 0.001;
       this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
-
-      const quaternion = new THREE.Quaternion();
-      const pitchQuat = new THREE.Quaternion();
-      const yawQuat = new THREE.Quaternion();
-      yawQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-      pitchQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch);
-      quaternion.multiplyQuaternions(yawQuat, pitchQuat);
-      this.camera.quaternion.copy(quaternion);
+      const q = new THREE.Quaternion().multiplyQuaternions(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch)
+      );
+      this.camera.quaternion.copy(q);
     });
-
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== this.renderer.domElement) {
         const euler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
@@ -1186,25 +1008,20 @@ export class Universe {
 
   private updateSpacecraft(): void {
     if (!this.spacecraftMode) { return; }
-
     const speed = this.keys['shift'] ? 50 : 3;
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
-
     this.camera.getWorldDirection(forward);
     right.crossVectors(forward, this.camera.up).normalize();
     up.copy(this.camera.up).normalize();
-
     if (this.keys['w']) { this.camera.position.addScaledVector(forward, speed); }
     if (this.keys['s']) { this.camera.position.addScaledVector(forward, -speed); }
     if (this.keys['a']) { this.camera.position.addScaledVector(right, -speed); }
     if (this.keys['d']) { this.camera.position.addScaledVector(right, speed); }
     if (this.keys['q']) { this.camera.position.addScaledVector(up, speed); }
     if (this.keys['e']) { this.camera.position.addScaledVector(up, -speed); }
-
-    const target = this.camera.position.clone().add(forward.multiplyScalar(100));
-    this.controls.target.copy(target);
+    this.controls.target.copy(this.camera.position.clone().add(forward.multiplyScalar(100)));
   }
 
   private showModeIndicator(spacecraft: boolean): void {
@@ -1223,84 +1040,50 @@ export class Universe {
 
   private animate(): void {
     requestAnimationFrame(() => this.animate());
-
-    // Pulse circular dependency lines
-    const pulse = (Math.sin(Date.now() * 0.003) + 1) / 2; // 0 to 1
-    this.lines.forEach(depLine => {
+    const pulse = (Math.sin(Date.now() * 0.003) + 1) / 2;
+    this.lines.forEach((depLine) => {
       if (depLine.dependency.layer === DependencyLayer.CIRCULAR) {
-        const material = depLine.line.material as THREE.LineBasicMaterial;
-        if (!this.focusedFileId && !this.focusedStarId) {
-          material.opacity = 0.4 + pulse * 0.5; // pulses between 0.4 and 0.9
-        }
+        const m = depLine.line.material as THREE.LineBasicMaterial;
+        if (!this.focusedFileId && !this.focusedStarId) { m.opacity = 0.4 + pulse * 0.5; }
       }
     });
-
     this.updateSpacecraft();
+    if (!this.spacecraftMode) { this.controls.update(); }
 
-    if (!this.spacecraftMode) {
-      this.controls.update();
-    }
-
-    // Orbital animation — only if enabled
     if (this.settings.enableAnimation) {
-
       if (this.centralCore) {
         this.centralCore.rotation.y += 0.0005;
         this.centralCore.rotation.x += 0.0002;
       }
-
       this.orbitalData.forEach((orbital, fileId) => {
         const planet = this.planets.get(fileId);
-
-        if (!planet) {
-          return;
-        }
-
+        if (!planet) { return; }
         orbital.angle += orbital.speed * this.settings.orbitalSpeed;
-
-        planet.mesh.position.x =
+        planet.position.x =
           orbital.starPosition.x +
-          orbital.radius *
-          Math.sin(orbital.inclination) *
-          Math.cos(orbital.angle);
-
-        planet.mesh.position.y =
-          orbital.starPosition.y +
-          orbital.radius *
-          Math.cos(orbital.inclination);
-
-        planet.mesh.position.z =
+          orbital.radius * Math.sin(orbital.inclination) * Math.cos(orbital.angle);
+        planet.position.y = orbital.starPosition.y + orbital.radius * Math.cos(orbital.inclination);
+        planet.position.z =
           orbital.starPosition.z +
-          orbital.radius *
-          Math.sin(orbital.inclination) *
-          Math.sin(orbital.angle);
-
-        planet.mesh.rotation.y += 0.002;
+          orbital.radius * Math.sin(orbital.inclination) * Math.sin(orbital.angle);
+        this.updateInstance(planet.instanceIndex, planet.position, planet.scale, planet.color);
       });
-
+      if (this.planetInstanceMesh) { this.planetInstanceMesh.instanceMatrix.needsUpdate = true; }
       this.updateDependencyLines();
     }
 
-    // Star self-rotation
     if (this.settings.enableStarRotation) {
-      this.stars.forEach(star => {
+      this.stars.forEach((star) => {
         star.mesh.rotation.y += 0.0008;
         star.mesh.rotation.x += 0.0003;
       });
     }
+    if (this.settings.showProximityLabels) { this.updateProximityLabels(); }
 
-    // Proximity labels — only if enabled
-    if (this.settings.showProximityLabels) {
-      this.updateProximityLabels();
-    }
-
-    // Uncommitted change rings always face camera and follow planets
-    const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3; // 0.3 to 0.9
+    const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3;
     this.uncommittedRings.forEach((ring, fileId) => {
-      const planet = this.planets.get(fileId);
-      if (planet) {
-        ring.position.copy(planet.mesh.position);
-      }
+      const p = this.planets.get(fileId);
+      if (p) { ring.position.copy(p.position); }
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = ringPulse;
     });
@@ -1310,59 +1093,42 @@ export class Universe {
   }
 
   private updateDependencyLines(): void {
-    this.lines.forEach(depLine => {
-      const sourcePlanet = this.planets.get(depLine.dependency.sourceId);
-      const targetPlanet = this.planets.get(depLine.dependency.targetId);
-      if (!sourcePlanet || !targetPlanet) { return; }
-
-      const positions = depLine.line.geometry.attributes.position;
-      positions.setXYZ(0,
-        sourcePlanet.mesh.position.x,
-        sourcePlanet.mesh.position.y,
-        sourcePlanet.mesh.position.z
-      );
-      positions.setXYZ(1,
-        targetPlanet.mesh.position.x,
-        targetPlanet.mesh.position.y,
-        targetPlanet.mesh.position.z
-      );
-      positions.needsUpdate = true;
+    this.lines.forEach((depLine) => {
+      const s = this.planets.get(depLine.dependency.sourceId);
+      const t = this.planets.get(depLine.dependency.targetId);
+      if (!s || !t) { return; }
+      const pos = depLine.line.geometry.attributes.position;
+      pos.setXYZ(0, s.position.x, s.position.y, s.position.z);
+      pos.setXYZ(1, t.position.x, t.position.y, t.position.z);
+      pos.needsUpdate = true;
     });
   }
 
   private initHelpButton(): void {
-    const button = document.getElementById('help-button')!;
+    const btn = document.getElementById('help-button')!;
     const panel = document.getElementById('shortcuts-panel')!;
-    button.addEventListener('click', () => {
-      const isVisible = panel.style.display === 'block';
-      panel.style.display = isVisible ? 'none' : 'block';
-      button.classList.toggle('active', !isVisible);
+    btn.addEventListener('click', () => {
+      const v = panel.style.display === 'block';
+      panel.style.display = v ? 'none' : 'block';
+      btn.classList.toggle('active', !v);
     });
   }
 
   private updateProximityLabels(): void {
     this.planets.forEach((planet, fileId) => {
-      const distance = this.camera.position.distanceTo(planet.mesh.position);
+      const distance = this.camera.position.distanceTo(planet.position);
       let label = this.planetLabels.get(fileId);
-
       if (distance < this.LABEL_SHOW_DISTANCE) {
-        const file = this.data?.files[fileId];
-        if (!file) { return; }
-
         if (!label) {
-          label = this.createPlanetLabel(file.name);
+          label = this.createPlanetLabel(this.data!.files[fileId].name);
           this.planetLabels.set(fileId, label);
           this.scene.add(label);
         }
-
-        label.position.copy(planet.mesh.position);
+        label.position.copy(planet.position);
         label.position.y += 8;
-        const opacity = 1 - (distance / this.LABEL_SHOW_DISTANCE);
-        (label.material as THREE.SpriteMaterial).opacity = opacity;
+        (label.material as THREE.SpriteMaterial).opacity = 1 - distance / this.LABEL_SHOW_DISTANCE;
         label.visible = true;
-      } else if (label) {
-        label.visible = false;
-      }
+      } else if (label) { label.visible = false; }
     });
   }
 
@@ -1371,7 +1137,6 @@ export class Universe {
     canvas.width = 256;
     canvas.height = 48;
     const ctx = canvas.getContext('2d')!;
-
     ctx.fillStyle = 'rgba(0,0,0,0)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.shadowColor = 'rgba(0,0,0,0.9)';
@@ -1381,141 +1146,91 @@ export class Universe {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(name, canvas.width / 2, canvas.height / 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({
-      map: texture, transparent: true, depthWrite: false, depthTest: false,
-    });
-
-    const sprite = new THREE.Sprite(material);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(canvas),
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+      })
+    );
     sprite.scale.set(50, 12, 1);
     return sprite;
   }
 
   public applySettings(settings: SettingsState): void {
     this.settings = settings;
-    // Sync checkboxes immediately so panel reflects saved state when opened
     this.syncPanelToSettings();
-    // Apply to scene — if build() hasn't run yet, lines/stars are empty so this is a no-op
-    // build() will call applySettingsToScene() again once objects exist
     this.applySettingsToScene();
   }
 
   private applySettingsToScene(): void {
-    // Performance mode changes geometry — requires rebuild signal
-    // Store previous state to detect actual change
     if (this.settings.performanceMode !== this.lastPerformanceMode) {
       this.lastPerformanceMode = this.settings.performanceMode;
-      this.addBackgroundStars(); // rebuild background stars immediately
-
-      // Show indicator that full rebuild is needed for geometry changes
+      this.addBackgroundStars();
       const indicator = document.getElementById('mode-indicator');
       if (indicator) {
         indicator.textContent = this.settings.performanceMode
           ? '⚡ Performance Mode — refresh for full effect'
           : '✨ Quality Mode — refresh for full effect';
         indicator.style.opacity = '1';
-        setTimeout(() => { indicator.style.opacity = '0'; }, 3000);
+        setTimeout(() => {
+          indicator.style.opacity = '0';
+        }, 3000);
       }
     }
-
-    // Performance mode — reduce pixel ratio to ease GPU load
-    if (this.settings.performanceMode) {
-      this.renderer.setPixelRatio(1);
-    } else {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    }
-
-    // Fog
-    this.scene.fog = this.settings.enableFog
-      ? new THREE.FogExp2(0x000000, 0.00006)
-      : null;
-
-    // Background stars
-    if (this.backgroundStars) {
-      this.backgroundStars.visible = this.settings.showBackgroundStars;
-    }
-
-    // Folder labels
-    this.starLabels.forEach(label => {
+    this.renderer.setPixelRatio(
+      this.settings.performanceMode ? 1 : Math.min(window.devicePixelRatio, 2)
+    );
+    this.scene.fog = this.settings.enableFog ? new THREE.FogExp2(0x000000, 0.00006) : null;
+    if (this.backgroundStars) { this.backgroundStars.visible = this.settings.showBackgroundStars; }
+    this.starLabels.forEach((label) => {
       label.visible = this.settings.showFolderLabels;
     });
-
-    // Legend
     const legend = document.getElementById('legend');
-    if (legend) {
-      legend.style.display = this.settings.showLegend ? 'block' : 'none';
-    }
-
-    // Dependency lines
-    this.lines.forEach(depLine => {
+    if (legend) { legend.style.display = this.settings.showLegend ? 'block' : 'none'; }
+    this.lines.forEach((depLine) => {
       const layer = depLine.dependency.layer;
       let visible = true;
-
-      if (layer === DependencyLayer.DIRECT && !this.settings.showDirectLines) {
-        visible = false;
-      }
-      if (layer === DependencyLayer.INDIRECT && !this.settings.showIndirectLines) {
-        visible = false;
-      }
+      if (layer === DependencyLayer.DIRECT && !this.settings.showDirectLines) { visible = false; }
+      if (layer === DependencyLayer.INDIRECT && !this.settings.showIndirectLines) { visible = false; }
       if (
         (layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
           layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY) &&
         !this.settings.showLayer3Lines
-      ) {
-        visible = false;
-      }
-      if (layer === DependencyLayer.CIRCULAR && !this.settings.showCircularLines) {
-        visible = false;
-      }
-
+      ) { visible = false; }
+      if (layer === DependencyLayer.CIRCULAR && !this.settings.showCircularLines) { visible = false; }
       depLine.line.visible = visible;
     });
-
-    // Minimap visibility
     const minimapBtn = document.getElementById('minimap-btn');
-    if (this.settings.showMinimap && !this.minimapVisible) {
-      minimapBtn?.click(); // turn on
-    } else if (!this.settings.showMinimap && this.minimapVisible) {
-      minimapBtn?.click(); // turn off
-    }
+    if (this.settings.showMinimap && !this.minimapVisible) { minimapBtn?.click(); }
+    else if (!this.settings.showMinimap && this.minimapVisible) { minimapBtn?.click(); }
   }
 
   private initSettingsPanel(): void {
     const panel = document.getElementById('settings-panel')!;
     const btn = document.getElementById('settings-btn')!;
-
-    // Toggle panel
     btn.addEventListener('click', () => {
-      const isVisible = panel.style.display === 'block';
-      panel.style.display = isVisible ? 'none' : 'block';
-      btn.classList.toggle('active', !isVisible);
+      const v = panel.style.display === 'block';
+      panel.style.display = v ? 'none' : 'block';
+      btn.classList.toggle('active', !v);
     });
-
-    // Helper to sync checkbox to setting and save
     const bindCheckbox = (id: string, key: keyof SettingsState) => {
       const el = document.getElementById(id) as HTMLInputElement;
       if (!el) { return; }
-
-      // Set initial state
       el.checked = !!this.settings[key];
-
       el.addEventListener('change', () => {
         (this.settings as any)[key] = el.checked;
         this.applySettingsToScene();
         this.saveSettings();
       });
     };
-
-    // Helper to sync slider
     const bindSlider = (id: string, key: keyof SettingsState) => {
       const el = document.getElementById(id) as HTMLInputElement;
       const valEl = document.getElementById('speed-val');
       if (!el) { return; }
-
       el.value = String(this.settings[key]);
       if (valEl) { valEl.textContent = `${parseFloat(el.value).toFixed(1)}x`; }
-
       el.addEventListener('input', () => {
         const val = parseFloat(el.value);
         (this.settings as any)[key] = val;
@@ -1523,7 +1238,6 @@ export class Universe {
         this.saveSettings();
       });
     };
-
     bindCheckbox('s-direct', 'showDirectLines');
     bindCheckbox('s-indirect', 'showIndirectLines');
     bindCheckbox('s-layer3', 'showLayer3Lines');
@@ -1537,13 +1251,11 @@ export class Universe {
     bindCheckbox('s-legend', 'showLegend');
     bindCheckbox('s-performance', 'performanceMode');
     bindCheckbox('s-minimap', 'showMinimap');
+    bindCheckbox('s-heatmap', 'showGitHeatmap');
     bindSlider('s-speed', 'orbitalSpeed');
-
-    // Preset buttons
-    document.querySelectorAll('.preset-btn').forEach(btn => {
+    document.querySelectorAll('.preset-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const preset = (btn as HTMLElement).dataset.preset as keyof typeof PRESETS;
-        this.applyPreset(preset);
+        this.applyPreset((btn as HTMLElement).dataset.preset as keyof typeof PRESETS);
         this.syncPanelToSettings();
       });
     });
@@ -1560,11 +1272,6 @@ export class Universe {
       const el = document.getElementById(id) as HTMLInputElement;
       if (el) { el.checked = val; }
     };
-    const setVal = (id: string, val: number) => {
-      const el = document.getElementById(id) as HTMLInputElement;
-      if (el) { el.value = String(val); }
-    };
-
     set('s-direct', this.settings.showDirectLines);
     set('s-indirect', this.settings.showIndirectLines);
     set('s-layer3', this.settings.showLayer3Lines);
@@ -1578,7 +1285,8 @@ export class Universe {
     set('s-legend', this.settings.showLegend);
     set('s-performance', this.settings.performanceMode);
     set('s-minimap', this.settings.showMinimap);
-    setVal('s-speed', this.settings.orbitalSpeed);
+    const speedEl = document.getElementById('s-speed') as HTMLInputElement;
+    if (speedEl) { speedEl.value = String(this.settings.orbitalSpeed); }
   }
 
   private saveSettings(): void {
@@ -1590,134 +1298,96 @@ export class Universe {
     this.flyToStar(folderId);
     const folder = this.data?.folders[folderId];
     if (!folder) { return; }
-
     const folderFileIds = new Set(folder.fileIds);
-
-    // Fade all planets not in this folder
     this.planets.forEach((planet, fileId) => {
-      const material = planet.mesh.material as THREE.MeshStandardMaterial;
-      if (folderFileIds.has(fileId)) {
-        material.opacity = 1;
-        material.transparent = false;
-      } else {
-        material.opacity = 0.05;
-        material.transparent = true;
-      }
+      const isConnected = folderFileIds.has(fileId);
+      const color = new THREE.Color(planet.color);
+      if (!isConnected) { color.multiplyScalar(0.1); }
+      this.planetInstanceMesh!.setColorAt(planet.instanceIndex, color);
     });
-
-    // Fade all stars except clicked one
+    this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
     this.stars.forEach((star, id) => {
-      const material = star.mesh.material as THREE.MeshStandardMaterial;
-      if (id === folderId) {
-        material.opacity = 1;
-        material.transparent = false;
-      } else {
-        material.opacity = 0.05;
-        material.transparent = true;
-      }
+      (star.mesh.material as THREE.MeshStandardMaterial).opacity = id === folderId ? 1 : 0.05;
+      (star.mesh.material as THREE.MeshStandardMaterial).transparent = true;
     });
-
-    // Fade labels — keep only clicked star's label
-    this.starLabels.forEach(label => {
+    this.starLabels.forEach((label) => {
       (label.material as THREE.SpriteMaterial).opacity = 0.05;
     });
-
-    // Show only dependency lines connected to this folder's files
-    this.lines.forEach(depLine => {
+    this.lines.forEach((depLine) => {
       const isConnected =
         folderFileIds.has(depLine.dependency.sourceId) ||
         folderFileIds.has(depLine.dependency.targetId);
       depLine.line.visible = isConnected;
-      const material = depLine.line.material as THREE.LineBasicMaterial;
-      if (isConnected) { material.opacity = 0.9; }
+      if (isConnected) { (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9; }
     });
   }
 
   private exitStarFocusMode(): void {
     this.focusedStarId = null;
-
-    this.planets.forEach(planet => {
-      const material = planet.mesh.material as THREE.MeshStandardMaterial;
-      material.opacity = 1;
-      material.transparent = false;
+    this.planets.forEach((planet) => {
+      this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
-
-    this.stars.forEach(star => {
-      const material = star.mesh.material as THREE.MeshStandardMaterial;
-      material.opacity = 1;
-      material.transparent = false;
+    this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
+    this.stars.forEach((star) => {
+      (star.mesh.material as THREE.MeshStandardMaterial).opacity = 1;
+      (star.mesh.material as THREE.MeshStandardMaterial).transparent = false;
     });
-
-    this.starLabels.forEach(label => {
+    this.starLabels.forEach((label) => {
       (label.material as THREE.SpriteMaterial).opacity = 1;
     });
-
-    this.lines.forEach(depLine => {
-      const material = depLine.line.material as THREE.LineBasicMaterial;
-      material.opacity = depLine.baseOpacity;
-      material.transparent = true;
+    this.lines.forEach((depLine) => {
+      (depLine.line.material as THREE.LineBasicMaterial).opacity = depLine.baseOpacity;
     });
-    // Re-apply settings — restores visibility correctly per user toggle state
     this.applySettingsToScene();
   }
 
   private initExportButton(): void {
-    const btn = document.getElementById('export-btn');
-    if (!btn) { return; }
-
-    btn.addEventListener('click', () => this.exportImage());
+    document.getElementById('export-btn')?.addEventListener('click', () => this.exportImage());
   }
 
   private exportImage(): void {
-    // Hide all UI overlays before capturing
     const uiElements = [
-      'tooltip', 'search-container', 'settings-panel',
-      'shortcuts-panel', 'filter-bar', 'legend',
-      'reset-camera', 'help-button', 'settings-btn',
-      'filter-btn', 'export-btn', 'refresh-universe',
+      'tooltip',
+      'search-container',
+      'settings-panel',
+      'shortcuts-panel',
+      'filter-bar',
+      'legend',
+      'reset-camera',
+      'help-button',
+      'settings-btn',
+      'filter-btn',
+      'export-btn',
+      'refresh-universe',
       'mode-indicator',
     ];
-
     const hidden: { el: HTMLElement; display: string }[] = [];
-
-    uiElements.forEach(id => {
+    uiElements.forEach((id) => {
       const el = document.getElementById(id);
       if (el && el.style.display !== 'none') {
         hidden.push({ el, display: el.style.display });
         el.style.display = 'none';
       }
     });
-
-    // Render one clean frame
     this.renderer.render(this.scene, this.camera);
-
-    // Capture canvas as PNG
     const dataUrl = this.renderer.domElement.toDataURL('image/png');
-
-    // Restore UI
     hidden.forEach(({ el, display }) => {
       el.style.display = display;
     });
-
-    // Send to extension host for saving
     sendToExtension({ type: 'EXPORT_IMAGE', payload: { dataUrl } });
-
-    // Show brief indicator
     const indicator = document.getElementById('mode-indicator');
     if (indicator) {
       indicator.textContent = '📷 Capturing...';
       indicator.style.opacity = '1';
-      setTimeout(() => { indicator.style.opacity = '0'; }, 1500);
+      setTimeout(() => {
+        indicator.style.opacity = '0';
+      }, 1500);
     }
   }
 
   private initRefreshButton(): void {
-    const button = document.getElementById('refresh-universe');
-    if (!button) { return; }
-
-    button.addEventListener('click', () => {
+    document.getElementById('refresh-universe')?.addEventListener('click', () => {
       sendToExtension({ type: 'REFRESH' });
-      // Show brief loading state
       const overlay = document.getElementById('loading-overlay');
       const loadingText = document.getElementById('loading-text');
       if (overlay && loadingText) {
@@ -1731,99 +1401,86 @@ export class Universe {
   private initFilterBar(): void {
     const bar = document.getElementById('filter-bar')!;
     const toggleBtn = document.getElementById('filter-btn')!;
-
     toggleBtn.addEventListener('click', () => {
-      const isVisible = bar.style.display === 'flex';
-      bar.style.display = isVisible ? 'none' : 'flex';
-      toggleBtn.classList.toggle('active', !isVisible);
+      const v = bar.style.display === 'flex';
+      bar.style.display = v ? 'none' : 'flex';
+      toggleBtn.classList.toggle('active', !v);
     });
-
-    // Keyboard shortcut T
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
-        toggleBtn.click();
-      }
+      if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) { toggleBtn.click(); }
     });
   }
 
   private applyFilter(): void {
-    // First update planet visibility based on extension
     this.planets.forEach((planet, fileId) => {
       const file = this.data?.files[fileId];
       if (!file) { return; }
-      // Match by extension — dynamic filter uses raw extensions
-      planet.mesh.visible = this.visibleTypes.has(file.extension.toLowerCase());
+      planet.visible = this.visibleTypes.has(file.extension.toLowerCase());
+      const s = planet.visible ? planet.scale : 0.0001;
+      this.updateInstance(planet.instanceIndex, planet.position, s, planet.color);
     });
-
-    // Then update lines — only show if both endpoints are visible
-    this.lines.forEach(depLine => {
-      const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.mesh.visible ?? false;
-      const targetVisible = this.planets.get(depLine.dependency.targetId)?.mesh.visible ?? false;
+    if (this.planetInstanceMesh) { this.planetInstanceMesh.instanceMatrix.needsUpdate = true; }
+    this.lines.forEach((depLine) => {
+      const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.visible ?? false;
+      const targetVisible = this.planets.get(depLine.dependency.targetId)?.visible ?? false;
       depLine.line.visible = sourceVisible && targetVisible;
     });
   }
 
   private applyGitVisuals(): void {
     if (!this.gitData?.available) { return; }
-
     const fileInfo = this.gitData.fileInfo;
-
-    // Find max commit count for normalization
-    const maxCommits = Math.max(
-      1,
-      ...Object.values(fileInfo).map(f => f.commitCount)
-    );
-
+    const maxCommits = Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount));
     this.planets.forEach((planet, fileId) => {
-      // Strip workspace prefix from fileId for lookup
       const cleanId = fileId.includes(':') ? fileId.split(':').slice(1).join(':') : fileId;
       const info = fileInfo[cleanId];
       if (!info) { return; }
 
-      const material = planet.mesh.material as THREE.MeshStandardMaterial;
+      let scaleFactor = 1;
+      if (info.commitCount > 0) { scaleFactor = 1 + (info.commitCount / maxCommits) * 1.5; }
+      planet.scale = scaleFactor;
 
-      // Recency glow — files changed in last 7 days glow brighter
-      if (info.daysSinceLastChange <= 7) {
-        const recencyFactor = 1 - (info.daysSinceLastChange / 7);
-        material.emissiveIntensity = 0.3 + recencyFactor * 0.7; // 0.3 to 1.0
-      } else if (info.daysSinceLastChange > 90) {
-        // Old files slightly dimmer
-        material.emissiveIntensity = 0.1;
+      let color = new THREE.Color(planet.color);
+      if (this.settings.showGitHeatmap) {
+        if (info.heat < 0.5) {
+          color.setHSL(0.6 - info.heat * 0.8, 1, 0.5);
+        } else {
+          color.setHSL(0.2 - (info.heat - 0.5) * 0.4, 1, 0.5);
+        }
+      } else {
+        if (info.daysSinceLastChange <= 7) {
+          const recencyFactor = 1 - info.daysSinceLastChange / 7;
+          color.lerp(new THREE.Color(0xffffff), recencyFactor * 0.5);
+        } else if (info.daysSinceLastChange > 90) {
+          color.multiplyScalar(0.7);
+        }
       }
 
-      // Hotspot size — scale planet by commit frequency
-      if (info.commitCount > 0) {
-        const normalizedCount = info.commitCount / maxCommits;
-        const scaleFactor = 1 + normalizedCount * 1.5; // up to 2.5x size
-        planet.mesh.scale.setScalar(scaleFactor);
-      }
-
-      // Uncommitted changes — add orange ring around planet
-      if (info.hasUncommittedChanges) {
-        this.addUncommittedRing(fileId, planet.mesh.position, planet.mesh.scale.x);
-      }
+      this.updateInstance(
+        planet.instanceIndex,
+        planet.position,
+        planet.visible ? planet.scale : 0.0001,
+        color.getHex()
+      );
+      if (info.hasUncommittedChanges) { this.addUncommittedRing(fileId, planet.position, planet.scale); }
     });
+    if (this.planetInstanceMesh) {
+      this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
+      if (this.planetInstanceMesh.instanceColor) { this.planetInstanceMesh.instanceColor.needsUpdate = true; }
+    }
   }
 
-  private uncommittedRings: Map<string, THREE.Mesh> = new Map();
-
   private addUncommittedRing(fileId: string, position: THREE.Vector3, planetScale: number): void {
-    if (this.uncommittedRings.has(fileId)) {
-      return;
-    }
-
-    const ringGeo = new THREE.RingGeometry(
-      2.2 * planetScale,  // inner radius
-      2.8 * planetScale,  // outer radius
-      16
+    if (this.uncommittedRings.has(fileId)) { return; }
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.2 * planetScale, 2.8 * planetScale, 16),
+      new THREE.MeshBasicMaterial({
+        color: 0xff8c00,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+      })
     );
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xFF8C00,    // orange
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.position.copy(position);
     this.uncommittedRings.set(fileId, ring);
     this.scene.add(ring);
@@ -1834,37 +1491,22 @@ export class Universe {
     const canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
     const btn = document.getElementById('minimap-btn');
     if (!canvas || !btn) { return; }
-
     this.minimapCanvas = canvas;
     this.minimapCtx = canvas.getContext('2d');
-
-    // Toggle minimap
     btn.addEventListener('click', () => {
       this.minimapVisible = !this.minimapVisible;
-      if (container) {
-        container.style.display = this.minimapVisible ? 'block' : 'none';
-      }
+      if (container) { container.style.display = this.minimapVisible ? 'block' : 'none'; }
       btn.classList.toggle('active', this.minimapVisible);
     });
-
-    // Click minimap to teleport camera
     canvas.addEventListener('click', (e) => {
       if (!this.minimapCtx) { return; }
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const size = canvas.width;
-
-      // Convert minimap coords to world coords
-      const worldX = (mx / size - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
-      const worldZ = (my / size - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
-
-      // Fly camera to clicked position
+      const worldX = ((e.clientX - rect.left) / canvas.width - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
+      const worldZ = ((e.clientY - rect.top) / canvas.width - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
       const target = new THREE.Vector3(worldX, 0, worldZ);
       const startPos = this.camera.position.clone();
       const startTarget = this.controls.target.clone();
       const endPos = new THREE.Vector3(worldX, this.camera.position.y, worldZ);
-
       let progress = 0;
       const fly = () => {
         if (progress >= 30) {
@@ -1882,86 +1524,134 @@ export class Universe {
       };
       fly();
     });
-
-    // Keyboard shortcut M (moved to initSearch for consistency if preferred, but user asked here)
-    // I'll leave it here as requested.
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
-        btn.click();
-      }
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !this.isTextInputTarget(e.target)) { btn.click(); }
+    });
+  }
+
+  private updateGitHud(): void {
+    const branchEl = document.getElementById('git-branch');
+    const hudEl = document.getElementById('git-hud');
+    if (this.gitData?.available && branchEl && hudEl) {
+      branchEl.textContent = this.gitData.branch;
+      hudEl.style.display = 'flex';
+    } else if (hudEl) {
+      hudEl.style.display = 'none';
+    }
+  }
+
+  private populateFilterBar(data: CosmosData): void {
+    const container = document.getElementById('filter-buttons');
+    if (!container) { return; }
+    container.innerHTML = '';
+
+    const extensions = new Set<string>();
+    Object.values(data.files).forEach((f) => extensions.add(f.extension.toLowerCase()));
+    const sorted = Array.from(extensions).sort();
+
+    sorted.forEach((ext) => {
+      this.visibleTypes.add(ext);
+      const btn = document.createElement('button');
+      btn.className = 'glass-panel active';
+      btn.style.padding = '8px 12px';
+      btn.style.fontSize = '11px';
+      btn.style.color = 'white';
+      btn.style.cursor = 'pointer';
+      btn.style.textAlign = 'left';
+      btn.style.transition = 'all 0.2s ease';
+      btn.style.display = 'flex';
+      btn.style.justifyContent = 'space-between';
+      btn.style.alignItems = 'center';
+      btn.style.border = '1px solid var(--glass-border)';
+
+      const color = (FILE_TYPE_COLORS as Record<string, number>)[ext] || 0x455a64;
+      const hexColor = `#${color.toString(16).padStart(6, '0')}`;
+
+      btn.innerHTML = `<span>.${ext}</span><span style="width:8px;height:8px;border-radius:50%;background:${hexColor};"></span>`;
+
+      btn.addEventListener('click', () => {
+        if (this.visibleTypes.has(ext)) {
+          this.visibleTypes.delete(ext);
+          btn.classList.remove('active');
+          btn.style.opacity = '0.4';
+        } else {
+          this.visibleTypes.add(ext);
+          btn.classList.add('active');
+          btn.style.opacity = '1';
+        }
+        this.applyFilter();
+      });
+      container.appendChild(btn);
+    });
+
+    document.getElementById('filter-all')?.addEventListener('click', () => {
+      sorted.forEach((ext) => this.visibleTypes.add(ext));
+      container.querySelectorAll('button').forEach((b: any) => {
+        b.classList.add('active');
+        b.style.opacity = '1';
+      });
+      this.applyFilter();
+    });
+
+    document.getElementById('filter-none')?.addEventListener('click', () => {
+      this.visibleTypes.clear();
+      container.querySelectorAll('button').forEach((b: any) => {
+        b.classList.remove('active');
+        b.style.opacity = '0.4';
+      });
+      this.applyFilter();
     });
   }
 
   private drawMinimap(): void {
     if (!this.minimapVisible || !this.minimapCtx || !this.minimapCanvas) { return; }
-
     const ctx = this.minimapCtx;
     const size = this.minimapCanvas.width;
     const half = size / 2;
     const worldHalf = this.MINIMAP_WORLD_SIZE;
-
-    // Convert world pos to minimap pixel
-    const toMinimap = (x: number, z: number): [number, number] => {
-      const px = (x / worldHalf) * half + half;
-      const py = (z / worldHalf) * half + half;
-      return [px, py];
-    };
-
-    // Clear
+    const toMinimap = (x: number, z: number): [number, number] => [
+      (x / worldHalf) * half + half,
+      (z / worldHalf) * half + half,
+    ];
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = 'rgba(0,0,0,0.85)';
     ctx.fillRect(0, 0, size, size);
-
-    // Draw stars as larger dots
     this.stars.forEach((star) => {
       const [px, py] = toMinimap(star.mesh.position.x, star.mesh.position.z);
-      if (px < 0 || px > size || py < 0 || py > size) { return; }
-      ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 244, 180, 0.8)';
-      ctx.fill();
+      if (px >= 0 && px <= size && py >= 0 && py <= size) {
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 244, 180, 0.8)';
+        ctx.fill();
+      }
     });
-
-    // Draw planets as tiny dots colored by type
     this.planets.forEach((planet) => {
-      if (!planet.mesh.visible) { return; }
-      const [px, py] = toMinimap(planet.mesh.position.x, planet.mesh.position.z);
-      if (px < 0 || px > size || py < 0 || py > size) { return; }
-
-      // Get planet color from material
-      const mat = planet.mesh.material as THREE.MeshStandardMaterial;
-      const col = mat.color;
-      ctx.beginPath();
-      ctx.arc(px, py, 1.2, 0, Math.PI * 2);
-      ctx.fillStyle = `rgb(${Math.floor(col.r * 255)},${Math.floor(col.g * 255)},${Math.floor(col.b * 255)})`;
-      ctx.fill();
+      if (!planet.visible) { return; }
+      const [px, py] = toMinimap(planet.position.x, planet.position.z);
+      if (px >= 0 && px <= size && py >= 0 && py <= size) {
+        const c = new THREE.Color(planet.color);
+        ctx.beginPath();
+        ctx.arc(px, py, 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgb(${Math.floor(c.r * 255)},${Math.floor(c.g * 255)},${Math.floor(c.b * 255)})`;
+        ctx.fill();
+      }
     });
-
-    // Draw central sun
     const [cx, cy] = toMinimap(0, 0);
     ctx.beginPath();
     ctx.arc(cx, cy, 5, 0, Math.PI * 2);
     ctx.fillStyle = '#ffaa00';
     ctx.fill();
-
-    // Draw camera position and frustum
     const [campx, campy] = toMinimap(this.camera.position.x, this.camera.position.z);
-
-    // Viewport frustum (improvised)
     const direction = new THREE.Vector3();
     this.camera.getWorldDirection(direction);
     const angle = Math.atan2(direction.z, direction.x);
     const fov = (this.camera.fov * Math.PI) / 180 / 2;
-    const viewDist = 20;
-
     ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.beginPath();
     ctx.moveTo(campx, campy);
-    ctx.arc(campx, campy, viewDist, angle - fov, angle + fov);
+    ctx.arc(campx, campy, 20, angle - fov, angle + fov);
     ctx.closePath();
     ctx.fill();
-
-    // Camera crosshair
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -1970,14 +1660,10 @@ export class Universe {
     ctx.moveTo(campx, campy - 5);
     ctx.lineTo(campx, campy + 5);
     ctx.stroke();
-
-    // Dot at camera position
     ctx.beginPath();
     ctx.arc(campx, campy, 2.5, 0, Math.PI * 2);
     ctx.fillStyle = 'white';
     ctx.fill();
-
-    // Border
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, size, size);

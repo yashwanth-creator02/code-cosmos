@@ -90,6 +90,8 @@ export interface CosmosDependency {
   specifier?: string;
   resolvedBy?: DependencyResolutionKind;
   referenceKind?: DependencyReferenceKind;
+  line?: number;
+  character?: number;
 }
 
 export interface StarNode {
@@ -125,6 +127,7 @@ export interface SettingsState {
   showLegend: boolean;
   performanceMode: boolean;
   showMinimap: boolean;
+  showGitHeatmap: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -142,6 +145,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   showLegend: true,
   performanceMode: false,
   showMinimap: false,
+  showGitHeatmap: false,
 };
 
 export interface FilterState {
@@ -152,6 +156,7 @@ export interface GitFileInfo {
   commitCount: number;
   daysSinceLastChange: number;
   hasUncommittedChanges: boolean;
+  heat: number;
 }
 
 export interface GitData {
