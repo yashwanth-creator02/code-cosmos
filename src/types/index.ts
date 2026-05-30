@@ -106,6 +106,7 @@ export interface SettingsState {
   showLayer3Lines: boolean;
   showCircularLines: boolean;
   enableAnimation: boolean;
+  enableStarRotation: boolean;
   orbitalSpeed: number;
   showFolderLabels: boolean;
   showProximityLabels: boolean;
@@ -122,6 +123,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   showLayer3Lines: false,
   showCircularLines: true,
   enableAnimation: false,
+  enableStarRotation: true,
   orbitalSpeed: 1.0,
   showFolderLabels: true,
   showProximityLabels: true,

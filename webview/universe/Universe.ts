@@ -19,26 +19,29 @@ const PRESETS = {
   clean: {
     showDirectLines: true, showIndirectLines: false,
     showLayer3Lines: false, showCircularLines: true,
-    enableAnimation: false, orbitalSpeed: 1.0,
+    enableAnimation: false, enableStarRotation: true,
+    orbitalSpeed: 1.0,
     showFolderLabels: true, showProximityLabels: true,
     showBackgroundStars: true, enableFog: true, showLegend: true,
-    performanceMode: false,
+    performanceMode: false, showMinimap: false,
   },
   full: {
     showDirectLines: true, showIndirectLines: true,
     showLayer3Lines: true, showCircularLines: true,
-    enableAnimation: true, orbitalSpeed: 1.0,
+    enableAnimation: true, enableStarRotation: true,
+    orbitalSpeed: 1.0,
     showFolderLabels: true, showProximityLabels: true,
     showBackgroundStars: true, enableFog: true, showLegend: true,
-    performanceMode: false,
+    performanceMode: false, showMinimap: true,
   },
   performance: {
     showDirectLines: true, showIndirectLines: false,
     showLayer3Lines: false, showCircularLines: true,
-    enableAnimation: false, orbitalSpeed: 1.0,
+    enableAnimation: false, enableStarRotation: false,
+    orbitalSpeed: 1.0,
     showFolderLabels: false, showProximityLabels: false,
     showBackgroundStars: false, enableFog: false, showLegend: true,
-    performanceMode: true,
+    performanceMode: true, showMinimap: false,
   },
 };
 
@@ -614,10 +617,12 @@ export class Universe {
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-          <strong>⭐ ${rootName}</strong><br>
-          Root Repository<br>
-          ${Object.keys(this.data!.files).length} total files<br>
-          ${Object.keys(this.data!.folders).length} total folders
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-gold);">⭐ ${rootName}</div>
+          <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Root Repository</div>
+          <div style="display:grid; grid-template-columns: 1fr auto; gap: 8px; font-size:11px;">
+            <span style="opacity:0.7;">Files</span><span style="font-weight:600;">${Object.keys(this.data!.files).length}</span>
+            <span style="opacity:0.7;">Folders</span><span style="font-weight:600;">${Object.keys(this.data!.folders).length}</span>
+          </div>
         `;
         return;
       }
@@ -643,11 +648,14 @@ export class Universe {
         tooltip.style.left = `${event.clientX + 15}px`;
         tooltip.style.top = `${event.clientY + 15}px`;
         tooltip.innerHTML = `
-          <strong>📁 ${this.escapeHtml(folder.name)}</strong><br>
-          Files: ${folder.fileIds.length}<br>
-          Subfolders: ${folder.childFolderIds.length}<br>
-          <span style="color:#ffffff">⬤</span> Out: ${outgoing} / In: ${incoming}<br>
-          ${hasCircular ? '<span style="color:#FF1744">⬤ Circular dependency inside</span>' : ''}
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--accent-blue);">📁 ${this.escapeHtml(folder.name)}</div>
+          <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Directory</div>
+          <div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
+            <span style="opacity:0.7;">Files</span><span style="font-weight:600;">${folder.fileIds.length}</span>
+            <span style="opacity:0.7;">Subfolders</span><span style="font-weight:600;">${folder.childFolderIds.length}</span>
+            <span style="opacity:0.7;">Out / In</span><span style="font-weight:600;">${outgoing} / ${incoming}</span>
+          </div>
+          ${hasCircular ? '<div style="margin-top:8px; color:#FF1744; font-size:10px; font-weight:600; display:flex; align-items:center; gap:4px;">⚠️ Circular dependencies inside</div>' : ''}
         `;
         return;
       }
@@ -689,15 +697,17 @@ export class Universe {
         const info = this.gitData.fileInfo[cleanId];
         if (info) {
           const recency = info.daysSinceLastChange === 999
-            ? 'Never committed'
+            ? 'Never'
             : info.daysSinceLastChange === 0
-              ? 'Changed today'
+              ? 'Today'
               : `${info.daysSinceLastChange}d ago`;
 
           gitHtml = `
-            <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:6px 0;">
-            <span style="color:#FFD700">⬤</span> ${info.commitCount} commits · ${recency}
-            ${info.hasUncommittedChanges ? '<br><span style="color:#FF8C00">⬤ Uncommitted changes</span>' : ''}
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.1); display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
+              <span style="opacity:0.6;">Commits</span><span style="font-weight:600; color:var(--accent-gold);">${info.commitCount}</span>
+              <span style="opacity:0.6;">Last Change</span><span style="font-weight:600;">${recency}</span>
+              ${info.hasUncommittedChanges ? '<span colspan="2" style="color:#FF8C00; font-size:10px; font-weight:600; margin-top:4px;">● Uncommitted changes</span>' : ''}
+            </div>
           `;
         }
       }
@@ -706,13 +716,13 @@ export class Universe {
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
       tooltip.innerHTML = `
-        <strong>${this.escapeHtml(file.name)}</strong><br>
-        Type: ${this.escapeHtml(file.extension.toUpperCase())}<br>
-        <span style="color:#ffffff">⬤</span> Direct: ${dependsOn} out / ${dependedBy} in<br>
-        <span style="color:#4488ff">⬤</span> Indirect: ${indirectCount}<br>
-        <span style="color:#FFB300">⬤</span> Shared dependent: ${sharedDependentCount}<br>
-        <span style="color:#00BCD4">⬤</span> Shared dependency: ${sharedDependencyCount}<br>
-        ${isCircular ? '<span style="color:#FF1744">⬤ Circular dependency</span><br>' : ''}
+        <div style="font-weight:700; font-size:14px; margin-bottom:4px;">${this.escapeHtml(file.name)}</div>
+        <div style="opacity:0.6; font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">${this.escapeHtml(file.extension.toUpperCase())} File</div>
+        <div style="display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size:11px;">
+          <span style="opacity:0.7;">Direct Deps</span><span style="font-weight:600;">${dependsOn} out / ${dependedBy} in</span>
+          <span style="opacity:0.7;">Indirect Chains</span><span style="font-weight:600;">${indirectCount}</span>
+          ${isCircular ? '<span colspan="2" style="color:#FF1744; font-size:10px; font-weight:600; margin-top:4px;">⚠️ Part of circular chain</span>' : ''}
+        </div>
         ${gitHtml}
       `;
       return;
@@ -904,11 +914,13 @@ export class Universe {
         const directoryLabel = this.getDirectoryLabel(f.relativePath, f.name);
         return `
           <div class="search-result" data-id="${this.escapeHtml(f.id)}" style="
-            padding: 8px 14px; color: white; font-family: sans-serif;
-            font-size: 12px; cursor: pointer;
+            padding: 10px 16px; color: white; font-family: sans-serif;
+            font-size: 13px; cursor: pointer;
             border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: background 0.2s;
           ">
-            <span style="opacity:0.5">${this.escapeHtml(directoryLabel)}</span>${this.escapeHtml(f.name)}
+            <div style="font-weight:600; color:var(--accent-blue);">${this.escapeHtml(f.name)}</div>
+            <div style="font-size:10px; opacity:0.4; margin-top:2px;">${this.escapeHtml(directoryLabel)}</div>
           </div>
         `;
       }).join('');
@@ -919,8 +931,12 @@ export class Universe {
           this.flyToPlanet(fileId);
           container.style.display = 'none';
         });
-        el.addEventListener('mouseenter', () => { (el as HTMLElement).style.background = 'rgba(255,255,255,0.1)'; });
-        el.addEventListener('mouseleave', () => { (el as HTMLElement).style.background = 'transparent'; });
+        el.addEventListener('mouseenter', () => {
+          (el as HTMLElement).style.background = 'rgba(255,255,255,0.08)';
+        });
+        el.addEventListener('mouseleave', () => {
+          (el as HTMLElement).style.background = 'transparent';
+        });
       });
     });
   }
@@ -989,8 +1005,6 @@ export class Universe {
   private initResetButton(): void {
     const button = document.getElementById('reset-camera')!;
     button.addEventListener('click', () => this.resetCamera());
-    button.addEventListener('mouseenter', () => { button.style.background = 'rgba(255,255,255,0.1)'; });
-    button.addEventListener('mouseleave', () => { button.style.background = 'rgba(0,0,0,0.85)'; });
   }
 
   public resetCamera(): void {
@@ -1197,10 +1211,14 @@ export class Universe {
     const indicator = document.getElementById('mode-indicator');
     if (!indicator) { return; }
     indicator.textContent = spacecraft
-      ? '🚀 Spacecraft — WASD to fly, Click to capture mouse'
-      : '🔭 Orbit Mode — F to switch';
+      ? '🚀 Pilot Mode — WASD to Fly, Click to Capture'
+      : '🔭 Orbit Mode — Press F to Switch';
     indicator.style.opacity = '1';
-    setTimeout(() => { indicator.style.opacity = '0'; }, 2000);
+    indicator.style.transform = 'translateY(0)';
+    setTimeout(() => {
+      indicator.style.opacity = '0';
+      indicator.style.transform = 'translateY(10px)';
+    }, 3000);
   }
 
   private animate(): void {
@@ -1230,10 +1248,6 @@ export class Universe {
         this.centralCore.rotation.y += 0.0005;
         this.centralCore.rotation.x += 0.0002;
       }
-
-      this.stars.forEach(star => {
-        star.mesh.rotation.y += 0.0005;
-      });
 
       this.orbitalData.forEach((orbital, fileId) => {
         const planet = this.planets.get(fileId);
@@ -1265,6 +1279,14 @@ export class Universe {
       });
 
       this.updateDependencyLines();
+    }
+
+    // Star self-rotation
+    if (this.settings.enableStarRotation) {
+      this.stars.forEach(star => {
+        star.mesh.rotation.y += 0.0008;
+        star.mesh.rotation.x += 0.0003;
+      });
     }
 
     // Proximity labels — only if enabled
@@ -1312,10 +1334,10 @@ export class Universe {
     const button = document.getElementById('help-button')!;
     const panel = document.getElementById('shortcuts-panel')!;
     button.addEventListener('click', () => {
-      panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+      const isVisible = panel.style.display === 'block';
+      panel.style.display = isVisible ? 'none' : 'block';
+      button.classList.toggle('active', !isVisible);
     });
-    button.addEventListener('mouseenter', () => { button.style.background = 'rgba(255,255,255,0.1)'; });
-    button.addEventListener('mouseleave', () => { button.style.background = 'rgba(0,0,0,0.85)'; });
   }
 
   private updateProximityLabels(): void {
@@ -1465,7 +1487,9 @@ export class Universe {
 
     // Toggle panel
     btn.addEventListener('click', () => {
-      panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+      const isVisible = panel.style.display === 'block';
+      panel.style.display = isVisible ? 'none' : 'block';
+      btn.classList.toggle('active', !isVisible);
     });
 
     // Helper to sync checkbox to setting and save
@@ -1474,7 +1498,7 @@ export class Universe {
       if (!el) { return; }
 
       // Set initial state
-      el.checked = this.settings[key] as boolean;
+      el.checked = !!this.settings[key];
 
       el.addEventListener('change', () => {
         (this.settings as any)[key] = el.checked;
@@ -1486,12 +1510,16 @@ export class Universe {
     // Helper to sync slider
     const bindSlider = (id: string, key: keyof SettingsState) => {
       const el = document.getElementById(id) as HTMLInputElement;
+      const valEl = document.getElementById('speed-val');
       if (!el) { return; }
 
       el.value = String(this.settings[key]);
+      if (valEl) { valEl.textContent = `${parseFloat(el.value).toFixed(1)}x`; }
 
       el.addEventListener('input', () => {
-        (this.settings as any)[key] = parseFloat(el.value);
+        const val = parseFloat(el.value);
+        (this.settings as any)[key] = val;
+        if (valEl) { valEl.textContent = `${val.toFixed(1)}x`; }
         this.saveSettings();
       });
     };
@@ -1501,6 +1529,7 @@ export class Universe {
     bindCheckbox('s-layer3', 'showLayer3Lines');
     bindCheckbox('s-circular', 'showCircularLines');
     bindCheckbox('s-animation', 'enableAnimation');
+    bindCheckbox('s-star-rotation', 'enableStarRotation');
     bindCheckbox('s-folder-labels', 'showFolderLabels');
     bindCheckbox('s-proximity-labels', 'showProximityLabels');
     bindCheckbox('s-bg-stars', 'showBackgroundStars');
@@ -1541,6 +1570,7 @@ export class Universe {
     set('s-layer3', this.settings.showLayer3Lines);
     set('s-circular', this.settings.showCircularLines);
     set('s-animation', this.settings.enableAnimation);
+    set('s-star-rotation', this.settings.enableStarRotation);
     set('s-folder-labels', this.settings.showFolderLabels);
     set('s-proximity-labels', this.settings.showProximityLabels);
     set('s-bg-stars', this.settings.showBackgroundStars);
@@ -1636,12 +1666,6 @@ export class Universe {
     if (!btn) { return; }
 
     btn.addEventListener('click', () => this.exportImage());
-    btn.addEventListener('mouseenter', () => {
-      btn.style.background = 'rgba(255,255,255,0.1)';
-    });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'rgba(0,0,0,0.85)';
-    });
   }
 
   private exportImage(): void {
@@ -1702,13 +1726,6 @@ export class Universe {
         overlay.style.opacity = '1';
       }
     });
-
-    button.addEventListener('mouseenter', () => {
-      button.style.background = 'rgba(255,255,255,0.1)';
-    });
-    button.addEventListener('mouseleave', () => {
-      button.style.background = 'rgba(0,0,0,0.85)';
-    });
   }
 
   private initFilterBar(): void {
@@ -1716,19 +1733,15 @@ export class Universe {
     const toggleBtn = document.getElementById('filter-btn')!;
 
     toggleBtn.addEventListener('click', () => {
-      bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
-    });
-    toggleBtn.addEventListener('mouseenter', () => {
-      toggleBtn.style.background = 'rgba(255,255,255,0.1)';
-    });
-    toggleBtn.addEventListener('mouseleave', () => {
-      toggleBtn.style.background = 'rgba(0,0,0,0.85)';
+      const isVisible = bar.style.display === 'flex';
+      bar.style.display = isVisible ? 'none' : 'flex';
+      toggleBtn.classList.toggle('active', !isVisible);
     });
 
     // Keyboard shortcut T
     window.addEventListener('keydown', (e) => {
       if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
-        bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
+        toggleBtn.click();
       }
     });
   }
@@ -1831,20 +1844,7 @@ export class Universe {
       if (container) {
         container.style.display = this.minimapVisible ? 'block' : 'none';
       }
-      btn.style.background = this.minimapVisible
-        ? 'rgba(255,255,255,0.2)'
-        : 'rgba(0,0,0,0.85)';
-    });
-
-    btn.addEventListener('mouseenter', () => {
-      if (!this.minimapVisible) {
-        btn.style.background = 'rgba(255,255,255,0.1)';
-      }
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (!this.minimapVisible) {
-        btn.style.background = 'rgba(0,0,0,0.85)';
-      }
+      btn.classList.toggle('active', this.minimapVisible);
     });
 
     // Click minimap to teleport camera
@@ -1946,7 +1946,7 @@ export class Universe {
 
     // Draw camera position and frustum
     const [campx, campy] = toMinimap(this.camera.position.x, this.camera.position.z);
-    
+
     // Viewport frustum (improvised)
     const direction = new THREE.Vector3();
     this.camera.getWorldDirection(direction);
