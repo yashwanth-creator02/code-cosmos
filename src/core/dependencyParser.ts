@@ -3,12 +3,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import pLimit from 'p-limit';
-import {
-  CosmosData,
-  CosmosDependency,
-  DependencyLayer,
-  DependencyType,
-} from '../types';
+import { CosmosData, CosmosDependency, DependencyLayer, DependencyType } from '../types';
 import { logger } from '../utils/logger';
 import { ALL_PARSERS, normalizePath, ParserSettings, ParserContext } from './parsers';
 
@@ -17,9 +12,7 @@ interface AliasMap {
 }
 
 function stripJsonComments(content: string): string {
-  return content
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
+  return content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 function parseJsonConfig(content: string): any | null {
@@ -48,7 +41,10 @@ function toWorkspaceRelative(basePath: string, workspaceRoot: string): string {
   return normalizePath(path.relative(workspaceRoot, absolute) || '.');
 }
 
-async function readConfigSettings(workspaceRoot: string, fileName: 'tsconfig.json' | 'jsconfig.json'): Promise<ParserSettings> {
+async function readConfigSettings(
+  workspaceRoot: string,
+  fileName: 'tsconfig.json' | 'jsconfig.json'
+): Promise<ParserSettings> {
   try {
     const configUri = vscode.Uri.file(path.join(workspaceRoot, fileName));
     const raw = await vscode.workspace.fs.readFile(configUri);
@@ -61,7 +57,9 @@ async function readConfigSettings(workspaceRoot: string, fileName: 'tsconfig.jso
 
     const compilerOptions = parsed.compilerOptions || {};
     const aliases = extractAliasesFromPaths(compilerOptions.paths || {});
-    const baseUrl = compilerOptions.baseUrl ? toWorkspaceRelative(String(compilerOptions.baseUrl), workspaceRoot) : undefined;
+    const baseUrl = compilerOptions.baseUrl
+      ? toWorkspaceRelative(String(compilerOptions.baseUrl), workspaceRoot)
+      : undefined;
 
     return { aliases, baseUrl };
   } catch {
@@ -113,7 +111,8 @@ async function readViteAliases(workspaceRoot: string): Promise<AliasMap> {
       const configUri = vscode.Uri.file(path.join(workspaceRoot, configName));
       const raw = await vscode.workspace.fs.readFile(configUri);
       const content = Buffer.from(raw).toString('utf8');
-      const aliasRegex = /['"]([^'"]+)['"]\s*:\s*path\.resolve\(\s*__dirname\s*,\s*['"]([^'"]+)['"]\s*\)/g;
+      const aliasRegex =
+        /['"]([^'"]+)['"]\s*:\s*path\.resolve\(\s*__dirname\s*,\s*['"]([^'"]+)['"]\s*\)/g;
 
       let match: RegExpExecArray | null;
       while ((match = aliasRegex.exec(content)) !== null) {
@@ -159,12 +158,7 @@ function buildNormalizedFileMap(data: CosmosData): Record<string, string> {
 
 function buildJavaPackageIndex(data: CosmosData): Map<string, string> {
   const index = new Map<string, string>();
-  const rootMarkers = [
-    'src/main/java/',
-    'src/test/java/',
-    'src/integrationTest/java/',
-    'src/',
-  ];
+  const rootMarkers = ['src/main/java/', 'src/test/java/', 'src/integrationTest/java/', 'src/'];
 
   for (const file of Object.values(data.files)) {
     if (file.extension.toLowerCase() !== 'java') {
@@ -207,7 +201,10 @@ export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[]
   return unique;
 }
 
-export async function parseDependencies(data: CosmosData, workspaceRootOverride?: string): Promise<CosmosDependency[]> {
+export async function parseDependencies(
+  data: CosmosData,
+  workspaceRootOverride?: string
+): Promise<CosmosDependency[]> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceRootOverride && (!workspaceFolders || workspaceFolders.length === 0)) {
     return [];
@@ -220,7 +217,7 @@ export async function parseDependencies(data: CosmosData, workspaceRootOverride?
   const allDeps: CosmosDependency[] = [];
 
   // Map extensions to parsers
-  const extensionMap = new Map<string, typeof ALL_PARSERS[0]>();
+  const extensionMap = new Map<string, (typeof ALL_PARSERS)[0]>();
   for (const parser of ALL_PARSERS) {
     for (const ext of parser.extensions) {
       extensionMap.set(ext, parser);
@@ -229,7 +226,7 @@ export async function parseDependencies(data: CosmosData, workspaceRootOverride?
 
   const limit = pLimit(10); // Process 10 files at a time
 
-  const tasks = Object.keys(data.files).map(fileId => {
+  const tasks = Object.keys(data.files).map((fileId) => {
     return limit(async () => {
       const file = data.files[fileId];
       const extension = file.extension.toLowerCase();
@@ -354,7 +351,10 @@ export function detectCircularDependencies(directDeps: CosmosDependency[]): Cosm
       });
 
       const cycleStart = pathTrace.indexOf(neighbor);
-      const cyclePath = cycleStart >= 0 ? [...pathTrace.slice(cycleStart), fileId, neighbor] : [...pathTrace, fileId, neighbor];
+      const cyclePath =
+        cycleStart >= 0
+          ? [...pathTrace.slice(cycleStart), fileId, neighbor]
+          : [...pathTrace, fileId, neighbor];
       logger.warn(`Circular dependency: ${cyclePath.join(' → ')}`);
     }
 

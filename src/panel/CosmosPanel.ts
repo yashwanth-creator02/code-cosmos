@@ -119,7 +119,9 @@ export class CosmosPanel {
         title: 'Save Code Cosmos Screenshot',
       });
 
-      if (!uri) {return;}
+      if (!uri) {
+        return;
+      }
       await vscode.workspace.fs.writeFile(uri, buffer);
 
       const open = await vscode.window.showInformationMessage(
@@ -127,9 +129,11 @@ export class CosmosPanel {
         'Open File',
         'Show in Explorer'
       );
-      if (open === 'Open File') {await vscode.commands.executeCommand('vscode.open', uri);}
-      else if (open === 'Show in Explorer')
-        {await vscode.commands.executeCommand('revealFileInOS', uri);}
+      if (open === 'Open File') {
+        await vscode.commands.executeCommand('vscode.open', uri);
+      } else if (open === 'Show in Explorer') {
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+      }
     } catch (err) {
       logger.error(`Export failed: ${err}`);
     }
@@ -137,7 +141,9 @@ export class CosmosPanel {
 
   private async openFile(fileId: string, line?: number, character?: number): Promise<void> {
     const file = this.lastUniverseData?.files[fileId];
-    if (!file) {return;}
+    if (!file) {
+      return;
+    }
 
     const options: vscode.TextDocumentShowOptions = {
       viewColumn: vscode.ViewColumn.Beside,
@@ -197,8 +203,11 @@ export class CosmosPanel {
   }
 
   public sendSettings(settings: SettingsState): void {
-    if (this.isReady) {this.panel.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });}
-    else {this.pendingSettings = settings;}
+    if (this.isReady) {
+      this.panel.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
+    } else {
+      this.pendingSettings = settings;
+    }
   }
 
   public onDispose(callback: () => void): void {

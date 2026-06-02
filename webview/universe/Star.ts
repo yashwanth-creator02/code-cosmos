@@ -8,6 +8,7 @@ export class Star {
   public position: THREE.Vector3;
   public folder: CosmosFolder;
   public light: THREE.PointLight;
+  public glowMesh: THREE.Mesh; // inner glow halo
 
   constructor(
     folder: CosmosFolder,
@@ -18,41 +19,63 @@ export class Star {
     this.folder = folder;
     this.position = position;
 
-    // Size philosophy:
-    // - Leaf folders (no subtree) get BASE_SIZE — fixed minimum
-    // - Size grows progressively with subtree using sqrt scaling
-    // - No cap — the root star can be huge, camera adjusts
-    const BASE_SIZE = 5; // fixed size for leaf folders
-    const SCALE_FACTOR = 1.2; // how much each file in subtree adds
-
+    // Progressive sizing — leaf folders fixed, grows with subtree
+    const BASE_SIZE = 5;
+    const SCALE_FACTOR = 1.1;
     const size = BASE_SIZE + Math.sqrt(subtreeFileCount) * SCALE_FACTOR;
 
-    const segments = performanceMode ? 8 : 16;
+    const segments = performanceMode ? 8 : 20;
+
+    // Star color — cooler (blue-white) for small/leaf, warmer (yellow) for large
+    // This mirrors real stellar classification (O/B = hot blue, K/M = cool yellow/red)
+    const warmth = Math.min(1, subtreeFileCount / 60);
+
+    let color: THREE.Color;
+    if (warmth < 0.15) {
+      // Small leaf folder — blue-white (hot star)
+      color = new THREE.Color(0xc8d8ff);
+    } else if (warmth < 0.4) {
+      // Medium — white-yellow
+      color = new THREE.Color(0xfff4d0);
+    } else if (warmth < 0.7) {
+      // Large — warm yellow
+      color = new THREE.Color(0xffe87a);
+    } else {
+      // Very large — orange-yellow (giant star)
+      color = new THREE.Color(0xffcc44);
+    }
+
     const geometry = new THREE.SphereGeometry(size, segments, segments);
-
-    // Slightly vary star color by depth/size to add visual interest
-    // Larger stars (more files) trend warmer/yellower
-    // Smaller stars (leaf folders) trend cooler/whiter
-    const warmth = Math.min(1, subtreeFileCount / 50);
-    const r = 0.95 + warmth * 0.05;
-    const g = 0.93 + warmth * 0.02;
-    const b = 0.78 - warmth * 0.2;
-    const color = new THREE.Color(r, g, b);
-
     const material = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.5,
+      roughness: 0.4,
+      metalness: 0.0,
     });
-
-    // Light radius scales with star size so larger stars illuminate more
-    const lightRadius = Math.max(120, size * 18);
-    const starLight = new THREE.PointLight(0xfff5c0, 0.8, lightRadius);
-    starLight.position.copy(position);
-    this.light = starLight;
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.position.copy(position);
     this.mesh.userData = { type: 'star', id: folder.id };
+
+    // Glow halo — slightly larger transparent sphere around the star
+    const glowGeo = new THREE.SphereGeometry(size * 1.6, 16, 16);
+    const glowMat = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.15,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.BackSide,
+    });
+    this.glowMesh = new THREE.Mesh(glowGeo, glowMat);
+    this.glowMesh.position.copy(position);
+
+    // Point light — color matches star, radius scales with size
+    const lightColor = color.clone().multiplyScalar(1.1);
+    const lightRadius = Math.max(150, size * 22);
+    const lightIntensity = 0.6 + warmth * 0.4;
+    this.light = new THREE.PointLight(lightColor, lightIntensity, lightRadius);
+    this.light.position.copy(position);
   }
 }

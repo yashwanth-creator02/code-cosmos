@@ -133,8 +133,9 @@ export class Universe {
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000);
-    this.scene.fog = new THREE.FogExp2(0x000000, 0.00006);
+    // Deep space color — slightly blue-tinted black feels more like space
+    this.scene.background = new THREE.Color(0x020408);
+    this.scene.fog = new THREE.FogExp2(0x020408, 0.00005);
 
     this.camera = new THREE.PerspectiveCamera(
       75,
@@ -153,12 +154,19 @@ export class Universe {
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    // Warm deep-space ambient — not pure white, slightly warm
+    const ambientLight = new THREE.AmbientLight(0xfff4e8, 0.15);
     this.scene.add(ambientLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1, 8000);
+    // Strong central sun light — warm golden
+    const pointLight = new THREE.PointLight(0xffcc66, 2.5, 10000);
     pointLight.position.set(0, 0, 0);
     this.scene.add(pointLight);
+
+    // Subtle fill light from opposite direction — prevents pure black shadows
+    const fillLight = new THREE.PointLight(0x4466ff, 0.3, 6000);
+    fillLight.position.set(-500, 300, -500);
+    this.scene.add(fillLight);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
@@ -194,6 +202,7 @@ export class Universe {
     this.initHelpButton();
     this.initExportButton();
     this.initMinimap();
+    this.initExitFocusButton();
     this.initRefreshButton();
     this.initFilterBar();
     this.initSettingsPanel();
@@ -251,6 +260,7 @@ export class Universe {
     this.stars.forEach((star) => {
       this.disposeSceneObject(star.mesh);
       this.disposeSceneObject(star.light);
+      if (star.glowMesh) { this.disposeSceneObject(star.glowMesh); }
     });
     if (this.planetInstanceMesh) {
       this.disposeSceneObject(this.planetInstanceMesh);
@@ -277,7 +287,9 @@ export class Universe {
     const segments = this.settings.performanceMode ? 6 : 16;
     const geometry = new THREE.SphereGeometry(2, segments, segments);
     const material = new THREE.MeshStandardMaterial({
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.55,  // stronger glow so planets are vivid against space
+      roughness: 0.35,           // slight texture — not perfectly smooth
+      metalness: 0.1,            // faint metallic sheen
       transparent: true,
     });
     this.planetInstanceMesh = new THREE.InstancedMesh(geometry, material, fileCount);
@@ -370,7 +382,7 @@ export class Universe {
       subtreeFileCount: node.subtreeFileCount,
     };
     this.stars.set(node.folderId, star);
-    this.scene.add(star.light, star.mesh);
+    this.scene.add(star.light, star.glowMesh, star.mesh);
     const labelScale = Math.max(40, 120 - node.depth * 15);
     const labelPosition = starPosition.clone();
     labelPosition.y += Math.max(12, 25 - node.depth * 3);
@@ -666,6 +678,9 @@ export class Universe {
 
   private enterFocusMode(fileId: string): void {
     this.focusedFileId = fileId;
+    // Show exit focus button
+    const exitBtn = document.getElementById('exit-focus-btn');
+    if (exitBtn) { exitBtn.style.display = 'flex'; }
     const connectedIds = new Set<string>([fileId]);
     this.dependencies.forEach((dep) => {
       if (dep.sourceId === fileId) { connectedIds.add(dep.targetId); }
@@ -697,6 +712,8 @@ export class Universe {
 
   private exitFocusMode(): void {
     this.focusedFileId = null;
+    const exitBtn = document.getElementById('exit-focus-btn');
+    if (exitBtn) { exitBtn.style.display = 'none'; }
     this.planets.forEach((planet) => {
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
@@ -871,68 +888,138 @@ export class Universe {
   }
 
   private addBackgroundStars(): void {
-    if (this.backgroundStars) { this.scene.remove(this.backgroundStars); }
-    const count = this.settings.performanceMode ? 300 : 2000;
+    if (this.backgroundStars) {
+      this.scene.remove(this.backgroundStars);
+      this.backgroundStars = null;
+    }
+    const count = this.settings.performanceMode ? 400 : 3000;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count * 3; i++) { positions[i] = (Math.random() - 0.5) * 10000; }
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+
+    // Star color palette — mostly white with hints of blue, yellow, red
+    const starColors = [
+      [1.0, 1.0, 1.0],   // white — most common
+      [1.0, 1.0, 1.0],
+      [1.0, 1.0, 1.0],
+      [0.8, 0.9, 1.0],   // blue-white
+      [1.0, 0.95, 0.8],  // yellow-white
+      [1.0, 0.85, 0.7],  // orange-white
+      [0.9, 0.95, 1.0],  // pale blue
+    ];
+
+    for (let i = 0; i < count; i++) {
+      // Distribute across a large sphere shell — not a cube
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 3000 + Math.random() * 7000;
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      positions[i * 3 + 2] = r * Math.cos(phi);
+
+      // Random star color
+      const col = starColors[Math.floor(Math.random() * starColors.length)];
+      colors[i * 3] = col[0];
+      colors[i * 3 + 1] = col[1];
+      colors[i * 3 + 2] = col[2];
+
+      // Varied sizes — most tiny, a few larger
+      sizes[i] = Math.random() < 0.95 ? 0.5 + Math.random() * 1.0 : 1.5 + Math.random() * 2.0;
+    }
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
     const material = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 1.5,
+      vertexColors: true,
+      size: 1.2,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.85,
+      sizeAttenuation: true,
     });
+
     this.backgroundStars = new THREE.Points(geometry, material);
     this.scene.add(this.backgroundStars);
   }
 
   private addCentralBody(rootFolder: CosmosFolder | undefined): void {
     if (!rootFolder) { return; }
+
+    // Core — bright hot center
     const core = new THREE.Mesh(
-      new THREE.SphereGeometry(40, 32, 32),
+      new THREE.SphereGeometry(40, 64, 64),
       new THREE.MeshStandardMaterial({
-        color: 0xfff5c0,
-        emissive: 0xffaa00,
-        emissiveIntensity: 0.8,
-        transparent: true,
-        opacity: 0.95,
+        color: 0xfffde7,
+        emissive: 0xffdd00,
+        emissiveIntensity: 1.2,
+        transparent: false,
       })
     );
     core.userData = { type: 'central', name: rootFolder.name };
     this.centralCore = core;
     this.centralObjects.push(core);
     this.scene.add(core);
-    const glow = new THREE.Mesh(
-      new THREE.SphereGeometry(55, 32, 32),
+
+    // Inner corona — warm orange
+    const corona1 = new THREE.Mesh(
+      new THREE.SphereGeometry(52, 32, 32),
       new THREE.MeshStandardMaterial({
-        color: 0xff8800,
-        emissive: 0xff6600,
-        emissiveIntensity: 0.4,
+        color: 0xff9900,
+        emissive: 0xff7700,
+        emissiveIntensity: 0.6,
         transparent: true,
-        opacity: 0.15,
+        opacity: 0.18,
         side: THREE.BackSide,
       })
     );
-    this.centralObjects.push(glow);
-    this.scene.add(glow);
-    const outerGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(75, 32, 32),
+    this.centralObjects.push(corona1);
+    this.scene.add(corona1);
+
+    // Mid corona — red-orange
+    const corona2 = new THREE.Mesh(
+      new THREE.SphereGeometry(68, 32, 32),
       new THREE.MeshStandardMaterial({
         color: 0xff4400,
         emissive: 0xff2200,
-        emissiveIntensity: 0.2,
+        emissiveIntensity: 0.3,
         transparent: true,
-        opacity: 0.06,
+        opacity: 0.09,
         side: THREE.BackSide,
       })
     );
-    this.centralObjects.push(outerGlow);
-    this.scene.add(outerGlow);
-    const centralLight = new THREE.PointLight(0xffaa44, 2, 5000);
+    this.centralObjects.push(corona2);
+    this.scene.add(corona2);
+
+    // Outer halo — very faint deep red
+    const corona3 = new THREE.Mesh(
+      new THREE.SphereGeometry(95, 32, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0xff1100,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.15,
+        transparent: true,
+        opacity: 0.04,
+        side: THREE.BackSide,
+      })
+    );
+    this.centralObjects.push(corona3);
+    this.scene.add(corona3);
+
+    // Strong central light
+    const centralLight = new THREE.PointLight(0xffcc55, 3.0, 6000);
+    centralLight.position.set(0, 0, 0);
     this.centralObjects.push(centralLight);
     this.scene.add(centralLight);
-    const label = this.createStarLabel(`⭐ ${rootFolder.name}`, new THREE.Vector3(0, 60, 0), 140);
+
+    // Secondary warm rim light
+    const rimLight = new THREE.PointLight(0xff8800, 1.5, 3000);
+    rimLight.position.set(0, 0, 0);
+    this.centralObjects.push(rimLight);
+    this.scene.add(rimLight);
+
+    const label = this.createStarLabel(`⭐ ${rootFolder.name}`, new THREE.Vector3(0, 70, 0), 150);
     this.starLabels.push(label);
     this.scene.add(label);
   }
@@ -943,18 +1030,48 @@ export class Universe {
     scaleWidth: number = 120
   ): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 512;
+    canvas.height = 80;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = 'rgba(0,0,0,0)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 6;
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.font = 'bold 26px sans-serif';
+
+    // Measure text first for pill sizing
+    ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const textWidth = ctx.measureText(name).width;
+    const padX = 24;
+    const padY = 10;
+    const pillW = Math.min(textWidth + padX * 2, canvas.width - 10);
+    const pillH = 44;
+    const pillX = (canvas.width - pillW) / 2;
+    const pillY = (canvas.height - pillH) / 2;
+    const radius = pillH / 2;
+
+    // Draw pill background
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.moveTo(pillX + radius, pillY);
+    ctx.lineTo(pillX + pillW - radius, pillY);
+    ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + pillH, radius);
+    ctx.lineTo(pillX + pillW, pillY + pillH - radius);
+    ctx.arcTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH, radius);
+    ctx.lineTo(pillX + radius, pillY + pillH);
+    ctx.arcTo(pillX, pillY + pillH, pillX, pillY + pillH - radius, radius);
+    ctx.lineTo(pillX, pillY + radius);
+    ctx.arcTo(pillX, pillY, pillX + radius, pillY, radius);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Text
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+    ctx.fillText(name, canvas.width / 2, canvas.height / 2, canvas.width - 20);
+
     const sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: new THREE.CanvasTexture(canvas),
@@ -964,7 +1081,8 @@ export class Universe {
       })
     );
     sprite.position.copy(position);
-    sprite.scale.set(scaleWidth, scaleWidth / 4, 1);
+    // Scale proportionally to canvas aspect
+    sprite.scale.set(scaleWidth, scaleWidth * (canvas.height / canvas.width), 1);
     sprite.userData = { type: 'label' };
     return sprite;
   }
@@ -1052,8 +1170,11 @@ export class Universe {
 
     if (this.settings.enableAnimation) {
       if (this.centralCore) {
-        this.centralCore.rotation.y += 0.0005;
-        this.centralCore.rotation.x += 0.0002;
+        this.centralCore.rotation.y += 0.0004;
+        this.centralCore.rotation.x += 0.00015;
+        // Breathing pulse on emissive
+        const pulse = 0.9 + Math.sin(Date.now() * 0.0008) * 0.3;
+        (this.centralCore.material as THREE.MeshStandardMaterial).emissiveIntensity = pulse;
       }
       this.orbitalData.forEach((orbital, fileId) => {
         const planet = this.planets.get(fileId);
@@ -1074,10 +1195,21 @@ export class Universe {
 
     if (this.settings.enableStarRotation) {
       this.stars.forEach((star) => {
-        star.mesh.rotation.y += 0.0008;
-        star.mesh.rotation.x += 0.0003;
+        star.mesh.rotation.y += 0.0004;
+        star.mesh.rotation.z += 0.0001;
       });
     }
+
+    // Circular dependency lines — pulsing red alert
+    const circularPulse = 0.45 + (Math.sin(Date.now() * 0.003) + 1) * 0.27;
+    this.lines.forEach(depLine => {
+      if (depLine.dependency.layer === DependencyLayer.CIRCULAR) {
+        const mat = depLine.line.material as THREE.LineBasicMaterial;
+        if (depLine.line.visible && !this.focusedFileId && !this.focusedStarId) {
+          mat.opacity = circularPulse;
+        }
+      }
+    });
     if (this.settings.showProximityLabels) { this.updateProximityLabels(); }
 
     const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3;
@@ -1134,18 +1266,46 @@ export class Universe {
 
   private createPlanetLabel(name: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 48;
+    canvas.width = 320;
+    canvas.height = 56;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = 'rgba(0,0,0,0)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.font = '22px sans-serif';
+
+    ctx.font = '20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const textWidth = ctx.measureText(name).width;
+    const padX = 16;
+    const pillW = Math.min(textWidth + padX * 2, canvas.width - 8);
+    const pillH = 34;
+    const pillX = (canvas.width - pillW) / 2;
+    const pillY = (canvas.height - pillH) / 2;
+    const radius = pillH / 2;
+
+    // Pill background
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.moveTo(pillX + radius, pillY);
+    ctx.lineTo(pillX + pillW - radius, pillY);
+    ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + radius, radius);
+    ctx.lineTo(pillX + pillW, pillY + pillH - radius);
+    ctx.arcTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH, radius);
+    ctx.lineTo(pillX + radius, pillY + pillH);
+    ctx.arcTo(pillX, pillY + pillH, pillX, pillY + pillH - radius, radius);
+    ctx.lineTo(pillX, pillY + radius);
+    ctx.arcTo(pillX, pillY, pillX + radius, pillY, radius);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Text
+    ctx.shadowColor = 'rgba(0,0,0,0.95)';
+    ctx.shadowBlur = 3;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+    ctx.fillText(name, canvas.width / 2, canvas.height / 2, canvas.width - 16);
+
     const sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: new THREE.CanvasTexture(canvas),
@@ -1154,7 +1314,7 @@ export class Universe {
         depthTest: false,
       })
     );
-    sprite.scale.set(50, 12, 1);
+    sprite.scale.set(44, 44 * (canvas.height / canvas.width), 1);
     return sprite;
   }
 
@@ -1295,6 +1455,8 @@ export class Universe {
 
   private enterStarFocusMode(folderId: string): void {
     this.focusedStarId = folderId;
+    const exitBtn = document.getElementById('exit-focus-btn');
+    if (exitBtn) { exitBtn.style.display = 'flex'; }
     this.flyToStar(folderId);
     const folder = this.data?.folders[folderId];
     if (!folder) { return; }
@@ -1324,6 +1486,8 @@ export class Universe {
 
   private exitStarFocusMode(): void {
     this.focusedStarId = null;
+    const exitBtn = document.getElementById('exit-focus-btn');
+    if (exitBtn) { exitBtn.style.display = 'none'; }
     this.planets.forEach((planet) => {
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
@@ -1484,6 +1648,15 @@ export class Universe {
     ring.position.copy(position);
     this.uncommittedRings.set(fileId, ring);
     this.scene.add(ring);
+  }
+
+  private initExitFocusButton(): void {
+    const btn = document.getElementById('exit-focus-btn');
+    if (!btn) { return; }
+    btn.addEventListener('click', () => {
+      this.exitFocusMode();
+      this.exitStarFocusMode();
+    });
   }
 
   private initMinimap(): void {
