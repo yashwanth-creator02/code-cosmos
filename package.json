@@ -1,20 +1,47 @@
 {
   "name": "code-cosmos",
-  "displayName": "code-cosmos",
-  "description": "A 3D universe for your codebase",
-  "version": "0.0.1",
+  "displayName": "Code Cosmos",
+  "description": "Explore your codebase as an interactive 3D universe. Files become planets, folders become stars, and dependencies become constellation lines. Navigate, focus, and understand any project at a glance.",
+  "version": "0.1.0",
+  "publisher": "040d8add-70f3-6b3a-a1df-cc025b275cf9",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#06060e",
+    "theme": "dark"
+  },
+  "keywords": [
+    "3d",
+    "visualization",
+    "dependencies",
+    "codebase",
+    "graph",
+    "explorer",
+    "universe",
+    "files"
+  ],
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yashwanth-creator02/code-cosmos"
+  },
+  "bugs": {
+    "url": "https://github.com/yashwanth-creator02/code-cosmos/issues"
+  },
+  "homepage": "https://github.com/yashwanth-creator02/code-cosmos#readme",
   "engines": {
     "vscode": "^1.120.0"
   },
-  "categories": [
-    "Other"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "code-cosmos.openCosmos",
-        "title": "Code Cosmos: Open Universe"
+        "title": "Code Cosmos: Open Universe",
+        "icon": "images/icon.png"
       }
     ]
   },

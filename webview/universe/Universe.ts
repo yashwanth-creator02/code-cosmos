@@ -216,14 +216,21 @@ export class Universe {
       geometry?: THREE.BufferGeometry;
       material?: THREE.Material | THREE.Material[];
     };
-    if (disposable.geometry) { disposable.geometry.dispose(); }
+    if (disposable.geometry) {
+      disposable.geometry.dispose();
+    }
     const disposeMaterial = (material: THREE.Material): void => {
       const m = material as THREE.Material & { map?: THREE.Texture | null };
-      if (m.map) { m.map.dispose(); }
+      if (m.map) {
+        m.map.dispose();
+      }
       material.dispose();
     };
-    if (Array.isArray(disposable.material)) { disposable.material.forEach(disposeMaterial); }
-    else if (disposable.material) { disposeMaterial(disposable.material); }
+    if (Array.isArray(disposable.material)) {
+      disposable.material.forEach(disposeMaterial);
+    } else if (disposable.material) {
+      disposeMaterial(disposable.material);
+    }
   }
 
   private isTextInputTarget(target: EventTarget | null): boolean {
@@ -260,7 +267,9 @@ export class Universe {
     this.stars.forEach((star) => {
       this.disposeSceneObject(star.mesh);
       this.disposeSceneObject(star.light);
-      if (star.glowMesh) { this.disposeSceneObject(star.glowMesh); }
+      if (star.glowMesh) {
+        this.disposeSceneObject(star.glowMesh);
+      }
     });
     if (this.planetInstanceMesh) {
       this.disposeSceneObject(this.planetInstanceMesh);
@@ -287,9 +296,9 @@ export class Universe {
     const segments = this.settings.performanceMode ? 6 : 16;
     const geometry = new THREE.SphereGeometry(2, segments, segments);
     const material = new THREE.MeshStandardMaterial({
-      emissiveIntensity: 0.55,  // stronger glow so planets are vivid against space
-      roughness: 0.35,           // slight texture — not perfectly smooth
-      metalness: 0.1,            // faint metallic sheen
+      emissiveIntensity: 0.55, // stronger glow so planets are vivid against space
+      roughness: 0.35, // slight texture — not perfectly smooth
+      metalness: 0.1, // faint metallic sheen
       transparent: true,
     });
     this.planetInstanceMesh = new THREE.InstancedMesh(geometry, material, fileCount);
@@ -342,7 +351,9 @@ export class Universe {
     }
 
     this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
-    if (this.planetInstanceMesh.instanceColor) { this.planetInstanceMesh.instanceColor.needsUpdate = true; }
+    if (this.planetInstanceMesh.instanceColor) {
+      this.planetInstanceMesh.instanceColor.needsUpdate = true;
+    }
 
     this.drawDependencies(data.dependencies);
     this.populateFilterBar(data);
@@ -357,7 +368,9 @@ export class Universe {
     scale: number,
     color: number
   ): void {
-    if (!this.planetInstanceMesh) { return; }
+    if (!this.planetInstanceMesh) {
+      return;
+    }
     const matrix = new THREE.Matrix4();
     matrix.makeScale(scale, scale, scale);
     matrix.setPosition(position);
@@ -367,7 +380,9 @@ export class Universe {
 
   private buildFromNode(node: StarNode, data: CosmosData, instanceIndex: number): number {
     const folder = data.folders[node.folderId];
-    if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) { return instanceIndex; }
+    if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) {
+      return instanceIndex;
+    }
     const starPosition = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
     const star = new Star(
       folder,
@@ -393,7 +408,9 @@ export class Universe {
     let nextIndex = instanceIndex;
     folder.fileIds.forEach((fileId, planetIndex) => {
       const file = data.files[fileId];
-      if (!file) { return; }
+      if (!file) {
+        return;
+      }
       const { position, angle, inclination } = this.orbitalPosition(
         starPosition,
         planetIndex,
@@ -470,15 +487,21 @@ export class Universe {
     });
 
     ordered.forEach((dep) => {
-      if (lineCount >= MAX_LINES) { return; }
+      if (lineCount >= MAX_LINES) {
+        return;
+      }
       const sourcePlanet = this.planets.get(dep.sourceId);
       const targetPlanet = this.planets.get(dep.targetId);
-      if (!sourcePlanet || !targetPlanet) { return; }
+      if (!sourcePlanet || !targetPlanet) {
+        return;
+      }
       if (
         this.planets.size > 300 &&
         (dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
           dep.layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY)
-      ) { return; }
+      ) {
+        return;
+      }
       const line = new DependencyLine(dep, sourcePlanet.position, targetPlanet.position);
       this.lines.push(line);
       this.scene.add(line.line);
@@ -487,7 +510,9 @@ export class Universe {
   }
 
   private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
-    if (this.spacecraftMode) { return; }
+    if (this.spacecraftMode) {
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -498,9 +523,12 @@ export class Universe {
       if (planetIntersects.length > 0 && planetIntersects[0].instanceId !== undefined) {
         const fileId = this.instanceToPlanet.get(planetIntersects[0].instanceId);
         if (fileId) {
-          if (this.focusedStarId) { this.exitStarFocusMode(); }
-          if (this.focusedFileId === fileId) { this.exitFocusMode(); }
-          else {
+          if (this.focusedStarId) {
+            this.exitStarFocusMode();
+          }
+          if (this.focusedFileId === fileId) {
+            this.exitFocusMode();
+          } else {
             this.enterFocusMode(fileId);
             sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
           }
@@ -513,9 +541,14 @@ export class Universe {
     const starIntersects = this.raycaster.intersectObjects(starMeshes);
     if (starIntersects.length > 0) {
       const folderId = starIntersects[0].object.userData.id as string;
-      if (this.focusedFileId) { this.exitFocusMode(); }
-      if (this.focusedStarId === folderId) { this.exitStarFocusMode(); }
-      else { this.enterStarFocusMode(folderId); }
+      if (this.focusedFileId) {
+        this.exitFocusMode();
+      }
+      if (this.focusedStarId === folderId) {
+        this.exitStarFocusMode();
+      } else {
+        this.enterStarFocusMode(folderId);
+      }
       return;
     }
 
@@ -547,8 +580,12 @@ export class Universe {
     const tooltip = document.getElementById('tooltip')!;
 
     const intersectable: THREE.Object3D[] = [...Array.from(this.stars.values()).map((s) => s.mesh)];
-    if (this.planetInstanceMesh) { intersectable.push(this.planetInstanceMesh); }
-    if (this.centralCore) { intersectable.push(this.centralCore); }
+    if (this.planetInstanceMesh) {
+      intersectable.push(this.planetInstanceMesh);
+    }
+    if (this.centralCore) {
+      intersectable.push(this.centralCore);
+    }
 
     const intersects = this.raycaster.intersectObjects(intersectable);
     if (intersects.length > 0) {
@@ -567,7 +604,9 @@ export class Universe {
       if (object.userData.type === 'star') {
         const folderId = object.userData.id as string;
         const folder = this.data!.folders[folderId];
-        if (!folder) { return; }
+        if (!folder) {
+          return;
+        }
         const folderFileIds = new Set(folder.fileIds);
         const outgoing = this.dependencies.filter(
           (d) => folderFileIds.has(d.sourceId) && d.layer === DependencyLayer.DIRECT
@@ -590,7 +629,9 @@ export class Universe {
       if (object === this.planetInstanceMesh && hovered.instanceId !== undefined) {
         const hoveredFileId = this.instanceToPlanet.get(hovered.instanceId);
         const file = hoveredFileId ? this.data?.files[hoveredFileId] : null;
-        if (!file) { return; }
+        if (!file) {
+          return;
+        }
         const dependsOn = this.dependencies.filter(
           (d) => d.sourceId === hoveredFileId && d.layer === DependencyLayer.DIRECT
         ).length;
@@ -656,7 +697,9 @@ export class Universe {
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
       tooltip.innerHTML = `<span style="color:${layerInfo.color}">⬤ ${this.escapeHtml(layerInfo.label)}</span><br><strong>From:</strong> ${this.escapeHtml(sourceFile.name)}<br><span style="opacity:0.5;font-size:10px">${this.escapeHtml(sourceFile.relativePath)}</span><br><strong>To:</strong> ${this.escapeHtml(targetFile.name)}<br><span style="opacity:0.5;font-size:10px">${this.escapeHtml(targetFile.relativePath)}</span>`;
-    } else { tooltip.style.display = 'none'; }
+    } else {
+      tooltip.style.display = 'none';
+    }
   }
 
   private getLayerInfo(layer: DependencyLayer): { label: string; color: string } {
@@ -680,17 +723,25 @@ export class Universe {
     this.focusedFileId = fileId;
     // Show exit focus button
     const exitBtn = document.getElementById('exit-focus-btn');
-    if (exitBtn) { exitBtn.style.display = 'flex'; }
+    if (exitBtn) {
+      exitBtn.style.display = 'flex';
+    }
     const connectedIds = new Set<string>([fileId]);
     this.dependencies.forEach((dep) => {
-      if (dep.sourceId === fileId) { connectedIds.add(dep.targetId); }
-      if (dep.targetId === fileId) { connectedIds.add(dep.sourceId); }
+      if (dep.sourceId === fileId) {
+        connectedIds.add(dep.targetId);
+      }
+      if (dep.targetId === fileId) {
+        connectedIds.add(dep.sourceId);
+      }
     });
 
     this.planets.forEach((planet, id) => {
       const isConnected = connectedIds.has(id);
       const color = new THREE.Color(planet.color);
-      if (!isConnected) { color.multiplyScalar(0.1); }
+      if (!isConnected) {
+        color.multiplyScalar(0.1);
+      }
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, color);
     });
     this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
@@ -706,14 +757,18 @@ export class Universe {
       const isConnected =
         depLine.dependency.sourceId === fileId || depLine.dependency.targetId === fileId;
       depLine.line.visible = isConnected;
-      if (isConnected) { (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9; }
+      if (isConnected) {
+        (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9;
+      }
     });
   }
 
   private exitFocusMode(): void {
     this.focusedFileId = null;
     const exitBtn = document.getElementById('exit-focus-btn');
-    if (exitBtn) { exitBtn.style.display = 'none'; }
+    if (exitBtn) {
+      exitBtn.style.display = 'none';
+    }
     this.planets.forEach((planet) => {
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
@@ -738,20 +793,30 @@ export class Universe {
     const results = document.getElementById('search-results')!;
     window.addEventListener('keydown', (e) => {
       const isTyping = this.isTextInputTarget(e.target);
-      if (isTyping && e.key !== 'Escape') { return; }
+      if (isTyping && e.key !== 'Escape') {
+        return;
+      }
       if ((e.ctrlKey && e.key === 'f') || e.key === '/') {
         e.preventDefault();
         container.style.display = container.style.display === 'block' ? 'none' : 'block';
-        if (container.style.display === 'block') { input.focus(); }
+        if (container.style.display === 'block') {
+          input.focus();
+        }
       }
-      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !isTyping) { this.exportImage(); }
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !isTyping) {
+        this.exportImage();
+      }
       if (e.key === 'Escape') {
         container.style.display = 'none';
         const sp = document.getElementById('shortcuts-panel');
-        if (sp) { sp.style.display = 'none'; }
+        if (sp) {
+          sp.style.display = 'none';
+        }
         this.exitFocusMode();
       }
-      if ((e.key === 'r' || e.key === 'R') && !isTyping) { this.resetCamera(); }
+      if ((e.key === 'r' || e.key === 'R') && !isTyping) {
+        this.resetCamera();
+      }
       if (e.key === '?' && !isTyping) {
         const panel = document.getElementById('shortcuts-panel')!;
         panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
@@ -801,13 +866,17 @@ export class Universe {
   }
 
   public focusOnFile(fileId: string): void {
-    if (this.focusedFileId === fileId) { return; }
+    if (this.focusedFileId === fileId) {
+      return;
+    }
     this.flyToPlanet(fileId);
   }
 
   public flyToPlanet(fileId: string): void {
     const planet = this.planets.get(fileId);
-    if (!planet) { return; }
+    if (!planet) {
+      return;
+    }
     const target = planet.position.clone();
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
@@ -834,7 +903,9 @@ export class Universe {
 
   private flyToStar(folderId: string): void {
     const star = this.stars.get(folderId);
-    if (!star) { return; }
+    if (!star) {
+      return;
+    }
     const target = star.mesh.position.clone();
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
@@ -900,13 +971,13 @@ export class Universe {
 
     // Star color palette — mostly white with hints of blue, yellow, red
     const starColors = [
-      [1.0, 1.0, 1.0],   // white — most common
+      [1.0, 1.0, 1.0], // white — most common
       [1.0, 1.0, 1.0],
       [1.0, 1.0, 1.0],
-      [0.8, 0.9, 1.0],   // blue-white
-      [1.0, 0.95, 0.8],  // yellow-white
-      [1.0, 0.85, 0.7],  // orange-white
-      [0.9, 0.95, 1.0],  // pale blue
+      [0.8, 0.9, 1.0], // blue-white
+      [1.0, 0.95, 0.8], // yellow-white
+      [1.0, 0.85, 0.7], // orange-white
+      [0.9, 0.95, 1.0], // pale blue
     ];
 
     for (let i = 0; i < count; i++) {
@@ -945,7 +1016,9 @@ export class Universe {
   }
 
   private addCentralBody(rootFolder: CosmosFolder | undefined): void {
-    if (!rootFolder) { return; }
+    if (!rootFolder) {
+      return;
+    }
 
     // Core — bright hot center
     const core = new THREE.Mesh(
@@ -1102,10 +1175,14 @@ export class Universe {
       this.keys[e.key.toLowerCase()] = false;
     });
     this.renderer.domElement.addEventListener('click', () => {
-      if (this.spacecraftMode) { this.renderer.domElement.requestPointerLock(); }
+      if (this.spacecraftMode) {
+        this.renderer.domElement.requestPointerLock();
+      }
     });
     document.addEventListener('mousemove', (e) => {
-      if (!this.spacecraftMode || document.pointerLockElement !== this.renderer.domElement) { return; }
+      if (!this.spacecraftMode || document.pointerLockElement !== this.renderer.domElement) {
+        return;
+      }
       this.yaw -= e.movementX * 0.001;
       this.pitch -= e.movementY * 0.001;
       this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
@@ -1125,7 +1202,9 @@ export class Universe {
   }
 
   private updateSpacecraft(): void {
-    if (!this.spacecraftMode) { return; }
+    if (!this.spacecraftMode) {
+      return;
+    }
     const speed = this.keys['shift'] ? 50 : 3;
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
@@ -1133,18 +1212,32 @@ export class Universe {
     this.camera.getWorldDirection(forward);
     right.crossVectors(forward, this.camera.up).normalize();
     up.copy(this.camera.up).normalize();
-    if (this.keys['w']) { this.camera.position.addScaledVector(forward, speed); }
-    if (this.keys['s']) { this.camera.position.addScaledVector(forward, -speed); }
-    if (this.keys['a']) { this.camera.position.addScaledVector(right, -speed); }
-    if (this.keys['d']) { this.camera.position.addScaledVector(right, speed); }
-    if (this.keys['q']) { this.camera.position.addScaledVector(up, speed); }
-    if (this.keys['e']) { this.camera.position.addScaledVector(up, -speed); }
+    if (this.keys['w']) {
+      this.camera.position.addScaledVector(forward, speed);
+    }
+    if (this.keys['s']) {
+      this.camera.position.addScaledVector(forward, -speed);
+    }
+    if (this.keys['a']) {
+      this.camera.position.addScaledVector(right, -speed);
+    }
+    if (this.keys['d']) {
+      this.camera.position.addScaledVector(right, speed);
+    }
+    if (this.keys['q']) {
+      this.camera.position.addScaledVector(up, speed);
+    }
+    if (this.keys['e']) {
+      this.camera.position.addScaledVector(up, -speed);
+    }
     this.controls.target.copy(this.camera.position.clone().add(forward.multiplyScalar(100)));
   }
 
   private showModeIndicator(spacecraft: boolean): void {
     const indicator = document.getElementById('mode-indicator');
-    if (!indicator) { return; }
+    if (!indicator) {
+      return;
+    }
     indicator.textContent = spacecraft
       ? '🚀 Pilot Mode — WASD to Fly, Click to Capture'
       : '🔭 Orbit Mode — Press F to Switch';
@@ -1162,11 +1255,15 @@ export class Universe {
     this.lines.forEach((depLine) => {
       if (depLine.dependency.layer === DependencyLayer.CIRCULAR) {
         const m = depLine.line.material as THREE.LineBasicMaterial;
-        if (!this.focusedFileId && !this.focusedStarId) { m.opacity = 0.4 + pulse * 0.5; }
+        if (!this.focusedFileId && !this.focusedStarId) {
+          m.opacity = 0.4 + pulse * 0.5;
+        }
       }
     });
     this.updateSpacecraft();
-    if (!this.spacecraftMode) { this.controls.update(); }
+    if (!this.spacecraftMode) {
+      this.controls.update();
+    }
 
     if (this.settings.enableAnimation) {
       if (this.centralCore) {
@@ -1178,7 +1275,9 @@ export class Universe {
       }
       this.orbitalData.forEach((orbital, fileId) => {
         const planet = this.planets.get(fileId);
-        if (!planet) { return; }
+        if (!planet) {
+          return;
+        }
         orbital.angle += orbital.speed * this.settings.orbitalSpeed;
         planet.position.x =
           orbital.starPosition.x +
@@ -1189,7 +1288,9 @@ export class Universe {
           orbital.radius * Math.sin(orbital.inclination) * Math.sin(orbital.angle);
         this.updateInstance(planet.instanceIndex, planet.position, planet.scale, planet.color);
       });
-      if (this.planetInstanceMesh) { this.planetInstanceMesh.instanceMatrix.needsUpdate = true; }
+      if (this.planetInstanceMesh) {
+        this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
+      }
       this.updateDependencyLines();
     }
 
@@ -1202,7 +1303,7 @@ export class Universe {
 
     // Circular dependency lines — pulsing red alert
     const circularPulse = 0.45 + (Math.sin(Date.now() * 0.003) + 1) * 0.27;
-    this.lines.forEach(depLine => {
+    this.lines.forEach((depLine) => {
       if (depLine.dependency.layer === DependencyLayer.CIRCULAR) {
         const mat = depLine.line.material as THREE.LineBasicMaterial;
         if (depLine.line.visible && !this.focusedFileId && !this.focusedStarId) {
@@ -1210,12 +1311,16 @@ export class Universe {
         }
       }
     });
-    if (this.settings.showProximityLabels) { this.updateProximityLabels(); }
+    if (this.settings.showProximityLabels) {
+      this.updateProximityLabels();
+    }
 
     const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3;
     this.uncommittedRings.forEach((ring, fileId) => {
       const p = this.planets.get(fileId);
-      if (p) { ring.position.copy(p.position); }
+      if (p) {
+        ring.position.copy(p.position);
+      }
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = ringPulse;
     });
@@ -1228,7 +1333,9 @@ export class Universe {
     this.lines.forEach((depLine) => {
       const s = this.planets.get(depLine.dependency.sourceId);
       const t = this.planets.get(depLine.dependency.targetId);
-      if (!s || !t) { return; }
+      if (!s || !t) {
+        return;
+      }
       const pos = depLine.line.geometry.attributes.position;
       pos.setXYZ(0, s.position.x, s.position.y, s.position.z);
       pos.setXYZ(1, t.position.x, t.position.y, t.position.z);
@@ -1260,7 +1367,9 @@ export class Universe {
         label.position.y += 8;
         (label.material as THREE.SpriteMaterial).opacity = 1 - distance / this.LABEL_SHOW_DISTANCE;
         label.visible = true;
-      } else if (label) { label.visible = false; }
+      } else if (label) {
+        label.visible = false;
+      }
     });
   }
 
@@ -1343,28 +1452,43 @@ export class Universe {
       this.settings.performanceMode ? 1 : Math.min(window.devicePixelRatio, 2)
     );
     this.scene.fog = this.settings.enableFog ? new THREE.FogExp2(0x000000, 0.00006) : null;
-    if (this.backgroundStars) { this.backgroundStars.visible = this.settings.showBackgroundStars; }
+    if (this.backgroundStars) {
+      this.backgroundStars.visible = this.settings.showBackgroundStars;
+    }
     this.starLabels.forEach((label) => {
       label.visible = this.settings.showFolderLabels;
     });
     const legend = document.getElementById('legend');
-    if (legend) { legend.style.display = this.settings.showLegend ? 'block' : 'none'; }
+    if (legend) {
+      legend.style.display = this.settings.showLegend ? 'block' : 'none';
+    }
     this.lines.forEach((depLine) => {
       const layer = depLine.dependency.layer;
       let visible = true;
-      if (layer === DependencyLayer.DIRECT && !this.settings.showDirectLines) { visible = false; }
-      if (layer === DependencyLayer.INDIRECT && !this.settings.showIndirectLines) { visible = false; }
+      if (layer === DependencyLayer.DIRECT && !this.settings.showDirectLines) {
+        visible = false;
+      }
+      if (layer === DependencyLayer.INDIRECT && !this.settings.showIndirectLines) {
+        visible = false;
+      }
       if (
         (layer === DependencyLayer.LAYER3_SHARED_DEPENDENT ||
           layer === DependencyLayer.LAYER3_SHARED_DEPENDENCY) &&
         !this.settings.showLayer3Lines
-      ) { visible = false; }
-      if (layer === DependencyLayer.CIRCULAR && !this.settings.showCircularLines) { visible = false; }
+      ) {
+        visible = false;
+      }
+      if (layer === DependencyLayer.CIRCULAR && !this.settings.showCircularLines) {
+        visible = false;
+      }
       depLine.line.visible = visible;
     });
     const minimapBtn = document.getElementById('minimap-btn');
-    if (this.settings.showMinimap && !this.minimapVisible) { minimapBtn?.click(); }
-    else if (!this.settings.showMinimap && this.minimapVisible) { minimapBtn?.click(); }
+    if (this.settings.showMinimap && !this.minimapVisible) {
+      minimapBtn?.click();
+    } else if (!this.settings.showMinimap && this.minimapVisible) {
+      minimapBtn?.click();
+    }
   }
 
   private initSettingsPanel(): void {
@@ -1377,7 +1501,9 @@ export class Universe {
     });
     const bindCheckbox = (id: string, key: keyof SettingsState) => {
       const el = document.getElementById(id) as HTMLInputElement;
-      if (!el) { return; }
+      if (!el) {
+        return;
+      }
       el.checked = !!this.settings[key];
       el.addEventListener('change', () => {
         (this.settings as any)[key] = el.checked;
@@ -1388,13 +1514,19 @@ export class Universe {
     const bindSlider = (id: string, key: keyof SettingsState) => {
       const el = document.getElementById(id) as HTMLInputElement;
       const valEl = document.getElementById('speed-val');
-      if (!el) { return; }
+      if (!el) {
+        return;
+      }
       el.value = String(this.settings[key]);
-      if (valEl) { valEl.textContent = `${parseFloat(el.value).toFixed(1)}x`; }
+      if (valEl) {
+        valEl.textContent = `${parseFloat(el.value).toFixed(1)}x`;
+      }
       el.addEventListener('input', () => {
         const val = parseFloat(el.value);
         (this.settings as any)[key] = val;
-        if (valEl) { valEl.textContent = `${val.toFixed(1)}x`; }
+        if (valEl) {
+          valEl.textContent = `${val.toFixed(1)}x`;
+        }
         this.saveSettings();
       });
     };
@@ -1430,7 +1562,9 @@ export class Universe {
   private syncPanelToSettings(): void {
     const set = (id: string, val: boolean) => {
       const el = document.getElementById(id) as HTMLInputElement;
-      if (el) { el.checked = val; }
+      if (el) {
+        el.checked = val;
+      }
     };
     set('s-direct', this.settings.showDirectLines);
     set('s-indirect', this.settings.showIndirectLines);
@@ -1446,7 +1580,9 @@ export class Universe {
     set('s-performance', this.settings.performanceMode);
     set('s-minimap', this.settings.showMinimap);
     const speedEl = document.getElementById('s-speed') as HTMLInputElement;
-    if (speedEl) { speedEl.value = String(this.settings.orbitalSpeed); }
+    if (speedEl) {
+      speedEl.value = String(this.settings.orbitalSpeed);
+    }
   }
 
   private saveSettings(): void {
@@ -1456,15 +1592,21 @@ export class Universe {
   private enterStarFocusMode(folderId: string): void {
     this.focusedStarId = folderId;
     const exitBtn = document.getElementById('exit-focus-btn');
-    if (exitBtn) { exitBtn.style.display = 'flex'; }
+    if (exitBtn) {
+      exitBtn.style.display = 'flex';
+    }
     this.flyToStar(folderId);
     const folder = this.data?.folders[folderId];
-    if (!folder) { return; }
+    if (!folder) {
+      return;
+    }
     const folderFileIds = new Set(folder.fileIds);
     this.planets.forEach((planet, fileId) => {
       const isConnected = folderFileIds.has(fileId);
       const color = new THREE.Color(planet.color);
-      if (!isConnected) { color.multiplyScalar(0.1); }
+      if (!isConnected) {
+        color.multiplyScalar(0.1);
+      }
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, color);
     });
     this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
@@ -1480,14 +1622,18 @@ export class Universe {
         folderFileIds.has(depLine.dependency.sourceId) ||
         folderFileIds.has(depLine.dependency.targetId);
       depLine.line.visible = isConnected;
-      if (isConnected) { (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9; }
+      if (isConnected) {
+        (depLine.line.material as THREE.LineBasicMaterial).opacity = 0.9;
+      }
     });
   }
 
   private exitStarFocusMode(): void {
     this.focusedStarId = null;
     const exitBtn = document.getElementById('exit-focus-btn');
-    if (exitBtn) { exitBtn.style.display = 'none'; }
+    if (exitBtn) {
+      exitBtn.style.display = 'none';
+    }
     this.planets.forEach((planet) => {
       this.planetInstanceMesh!.setColorAt(planet.instanceIndex, new THREE.Color(planet.color));
     });
@@ -1571,19 +1717,25 @@ export class Universe {
       toggleBtn.classList.toggle('active', !v);
     });
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) { toggleBtn.click(); }
+      if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
+        toggleBtn.click();
+      }
     });
   }
 
   private applyFilter(): void {
     this.planets.forEach((planet, fileId) => {
       const file = this.data?.files[fileId];
-      if (!file) { return; }
+      if (!file) {
+        return;
+      }
       planet.visible = this.visibleTypes.has(file.extension.toLowerCase());
       const s = planet.visible ? planet.scale : 0.0001;
       this.updateInstance(planet.instanceIndex, planet.position, s, planet.color);
     });
-    if (this.planetInstanceMesh) { this.planetInstanceMesh.instanceMatrix.needsUpdate = true; }
+    if (this.planetInstanceMesh) {
+      this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
+    }
     this.lines.forEach((depLine) => {
       const sourceVisible = this.planets.get(depLine.dependency.sourceId)?.visible ?? false;
       const targetVisible = this.planets.get(depLine.dependency.targetId)?.visible ?? false;
@@ -1592,16 +1744,22 @@ export class Universe {
   }
 
   private applyGitVisuals(): void {
-    if (!this.gitData?.available) { return; }
+    if (!this.gitData?.available) {
+      return;
+    }
     const fileInfo = this.gitData.fileInfo;
     const maxCommits = Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount));
     this.planets.forEach((planet, fileId) => {
       const cleanId = fileId.includes(':') ? fileId.split(':').slice(1).join(':') : fileId;
       const info = fileInfo[cleanId];
-      if (!info) { return; }
+      if (!info) {
+        return;
+      }
 
       let scaleFactor = 1;
-      if (info.commitCount > 0) { scaleFactor = 1 + (info.commitCount / maxCommits) * 1.5; }
+      if (info.commitCount > 0) {
+        scaleFactor = 1 + (info.commitCount / maxCommits) * 1.5;
+      }
       planet.scale = scaleFactor;
 
       let color = new THREE.Color(planet.color);
@@ -1626,16 +1784,22 @@ export class Universe {
         planet.visible ? planet.scale : 0.0001,
         color.getHex()
       );
-      if (info.hasUncommittedChanges) { this.addUncommittedRing(fileId, planet.position, planet.scale); }
+      if (info.hasUncommittedChanges) {
+        this.addUncommittedRing(fileId, planet.position, planet.scale);
+      }
     });
     if (this.planetInstanceMesh) {
       this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
-      if (this.planetInstanceMesh.instanceColor) { this.planetInstanceMesh.instanceColor.needsUpdate = true; }
+      if (this.planetInstanceMesh.instanceColor) {
+        this.planetInstanceMesh.instanceColor.needsUpdate = true;
+      }
     }
   }
 
   private addUncommittedRing(fileId: string, position: THREE.Vector3, planetScale: number): void {
-    if (this.uncommittedRings.has(fileId)) { return; }
+    if (this.uncommittedRings.has(fileId)) {
+      return;
+    }
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(2.2 * planetScale, 2.8 * planetScale, 16),
       new THREE.MeshBasicMaterial({
@@ -1652,7 +1816,9 @@ export class Universe {
 
   private initExitFocusButton(): void {
     const btn = document.getElementById('exit-focus-btn');
-    if (!btn) { return; }
+    if (!btn) {
+      return;
+    }
     btn.addEventListener('click', () => {
       this.exitFocusMode();
       this.exitStarFocusMode();
@@ -1663,16 +1829,22 @@ export class Universe {
     const container = document.getElementById('minimap-container');
     const canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
     const btn = document.getElementById('minimap-btn');
-    if (!canvas || !btn) { return; }
+    if (!canvas || !btn) {
+      return;
+    }
     this.minimapCanvas = canvas;
     this.minimapCtx = canvas.getContext('2d');
     btn.addEventListener('click', () => {
       this.minimapVisible = !this.minimapVisible;
-      if (container) { container.style.display = this.minimapVisible ? 'block' : 'none'; }
+      if (container) {
+        container.style.display = this.minimapVisible ? 'block' : 'none';
+      }
       btn.classList.toggle('active', this.minimapVisible);
     });
     canvas.addEventListener('click', (e) => {
-      if (!this.minimapCtx) { return; }
+      if (!this.minimapCtx) {
+        return;
+      }
       const rect = canvas.getBoundingClientRect();
       const worldX = ((e.clientX - rect.left) / canvas.width - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
       const worldZ = ((e.clientY - rect.top) / canvas.width - 0.5) * this.MINIMAP_WORLD_SIZE * 2;
@@ -1698,7 +1870,9 @@ export class Universe {
       fly();
     });
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !this.isTextInputTarget(e.target)) { btn.click(); }
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !this.isTextInputTarget(e.target)) {
+        btn.click();
+      }
     });
   }
 
@@ -1715,7 +1889,9 @@ export class Universe {
 
   private populateFilterBar(data: CosmosData): void {
     const container = document.getElementById('filter-buttons');
-    if (!container) { return; }
+    if (!container) {
+      return;
+    }
     container.innerHTML = '';
 
     const extensions = new Set<string>();
@@ -1777,7 +1953,9 @@ export class Universe {
   }
 
   private drawMinimap(): void {
-    if (!this.minimapVisible || !this.minimapCtx || !this.minimapCanvas) { return; }
+    if (!this.minimapVisible || !this.minimapCtx || !this.minimapCanvas) {
+      return;
+    }
     const ctx = this.minimapCtx;
     const size = this.minimapCanvas.width;
     const half = size / 2;
@@ -1799,7 +1977,9 @@ export class Universe {
       }
     });
     this.planets.forEach((planet) => {
-      if (!planet.visible) { return; }
+      if (!planet.visible) {
+        return;
+      }
       const [px, py] = toMinimap(planet.position.x, planet.position.z);
       if (px >= 0 && px <= size && py >= 0 && py <= size) {
         const c = new THREE.Color(planet.color);

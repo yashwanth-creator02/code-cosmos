@@ -1,0 +1,46 @@
+# VS Code extension packaging exclusions.
+
+# vsce packs everything NOT listed here, so be explicit about what to keep out.
+
+# VS Code internal folders
+
+.vscode/**
+.vscode-test/** \*_/.vscode-test._
+
+# TypeScript source — compiled output in out/ is what gets shipped
+
+src/\*_
+\*\*/_.ts
+
+# Stale webview build artifacts (dead code — real build is in out/webview/)
+
+webview/main.js
+webview/bridge/messageBridge.js
+
+# Source maps (already excluded by \*_/_.map but listed explicitly for clarity)
+
+\*_/_.map
+
+# Dev/build tooling — not needed at runtime
+
+**/tsconfig.json
+**/eslint.config.mjs \*_/prettier.config._
+vite.config.mjs
+.gitignore
+.yarnrc
+
+# Boilerplate file VS Code scaffolding adds
+
+vsc-extension-quickstart.md
+
+# Tests
+
+**/\*.test.ts
+**/\*.spec.ts
+.vscode-test/
+
+# Per-developer cosmos files
+
+.cosmos
+.cosmos.cache
+.cosmos.lock

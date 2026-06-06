@@ -3,3 +3,16 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+
+# Stale webview build artifacts committed during development.
+# Vite compiles the real versions into out/webview/ at build time.
+# These files in the source tree are dead code — delete them from the repo.
+webview/main.js
+webview/main.js.map
+webview/bridge/messageBridge.js
+webview/bridge/messageBridge.js.map
+
+# Per-developer Code Cosmos workspace files (future feature)
+.cosmos
+.cosmos.cache
+.cosmos.lock

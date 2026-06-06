@@ -1,71 +1,326 @@
-# code-cosmos README
+<div align="center">
 
-This is the README for your extension "code-cosmos". After writing up a brief description, we recommend including the following sections.
+<img src="images/icon.png" width="128" height="128" alt="Code Cosmos Logo"/>
 
-## Features
+# Code Cosmos
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### Explore your codebase as an interactive 3D universe.
 
-For example if there is an image subfolder under your extension project workspace:
+Files become planets. Folders become stars. Dependencies become constellation lines.
 
-\!\[feature X\]\(images/feature-x.png\)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/Yashwanth.code-cosmos?color=blueviolet&label=marketplace)](https://marketplace.visualstudio.com/items?itemName=Yashwanth.code-cosmos)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/Yashwanth.code-cosmos?color=blue)](https://marketplace.visualstudio.com/items?itemName=Yashwanth.code-cosmos)
+[![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+<!-- HERO GIF PLACEHOLDER
+     Record: Open Code Cosmos on a medium-sized project (50-150 files).
+     Start zoomed in on one solar system, slowly pull the camera back
+     to reveal the full galaxy — multiple folder-stars with their
+     planet-files orbiting them, dependency lines connecting clusters.
+     Then zoom back into one star and orbit around it.
+     Duration: 20-25 seconds. Save as images/hero.gif -->
 
-## Requirements
+![Code Cosmos in action](images/hero.gif)
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-- `myExtension.enable`: Enable/disable this extension.
-- `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+</div>
 
 ---
 
-## Following extension guidelines
+## What is Code Cosmos?
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+Large codebases are hard to navigate. After a certain size, no amount of file-tree browsing gives you a real sense of how the pieces connect. Code Cosmos maps your repository into a navigable 3D space — folders orbit as stars, files orbit those stars as planets, and every import statement becomes a visible line between them.
 
-- [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+It is not a replacement for your editor. It is a way to **understand** before you code — to see the shape of a project you just cloned, spot tightly coupled clusters before you refactor, or trace a bug across file boundaries visually.
 
-## Working with Markdown
+---
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+## Features
 
-- Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-- Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-- Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+### 3D Universe Rendering
 
-## For more information
+Every folder in your project becomes a star. Every file becomes a planet orbiting that star. The size of a star scales with how many files it contains. Planet colours reflect their file type. The whole scene is live — orbit it, fly through it, zoom in and out freely.
 
-- [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-- [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+<!-- SCREENSHOT PLACEHOLDER
+     Record: A static screenshot showing a well-structured project —
+     several distinct star clusters with their planets clearly visible,
+     dependency lines connecting them. Ideally taken from a medium
+     zoom distance so both the full galaxy and individual planets
+     are legible. Save as images/universe-overview.png -->
 
-**Enjoy!**
+![Universe overview](images/universe-overview.png)
+
+---
+
+### Dependency Visualization
+
+Code Cosmos parses import statements across 16 languages and draws them as lines between planets. Toggle individual layers on and off:
+
+| Layer        | What it shows                             |
+| ------------ | ----------------------------------------- |
+| **Direct**   | Every explicit import between files       |
+| **Indirect** | Transitive connections two hops away      |
+| **Shared**   | Files that multiple other files depend on |
+| **Circular** | Mutual import loops — these pulse red     |
+
+<!-- GIF PLACEHOLDER
+     Record: Open the filter panel and toggle dependency layers on/off
+     one by one. Show: all off → direct only → add indirect →
+     add circular (show a red pulsing loop).
+     Duration: 15 seconds. Save as images/dependency-layers.gif -->
+
+![Dependency layers](images/dependency-layers.gif)
+
+---
+
+### Focus Mode
+
+Click any planet to focus on it. Everything else dims. Only that file's direct connections stay visible — the files it imports and the files that import it, highlighted as a constellation.
+
+Press `Esc` or click empty space to exit focus mode.
+
+<!-- GIF PLACEHOLDER
+     Record: Click a planet that has several connections (e.g. a service
+     or a utility file). Show the rest of the universe dimming, leaving
+     only the focused planet and its connected planets glowing.
+     Then click a different planet to switch focus.
+     Duration: 12 seconds. Save as images/focus-mode.gif -->
+
+![Focus mode](images/focus-mode.gif)
+
+---
+
+### Git Heatmap
+
+Enable the git heatmap to colour-code your universe by activity. Files that change frequently shift toward orange and red. Files untouched for months sit cool and blue. Uncommitted changes appear as glowing animated rings around their planet.
+
+<!-- SCREENSHOT PLACEHOLDER
+     Record: A screenshot of a git-enabled project with heatmap turned on.
+     The goal is to show clear colour variation across planets —
+     some hot (red/orange), some cold (blue/white).
+     Save as images/git-heatmap.png -->
+
+![Git heatmap](images/git-heatmap.png)
+
+---
+
+### Spacecraft Navigation
+
+Press `F` to toggle **Pilot Mode**. The mouse unlocks from orbit control and you fly freely through the universe using your keyboard.
+
+| Key       | Action                 |
+| --------- | ---------------------- |
+| `W` / `S` | Fly forward / backward |
+| `A` / `D` | Strafe left / right    |
+| `Q` / `E` | Ascend / descend       |
+| `Shift`   | Sprint (5× speed)      |
+| `F`       | Exit pilot mode        |
+
+<!-- GIF PLACEHOLDER
+     Record: Toggle pilot mode on, then fly through the universe —
+     approach one star cluster from a distance, fly between its planets,
+     then bank toward another cluster. Show the speed difference
+     with and without Shift held.
+     Duration: 15-20 seconds. Save as images/spacecraft.gif -->
+
+![Spacecraft navigation](images/spacecraft.gif)
+
+---
+
+### Minimap
+
+Press `M` to open the overhead minimap. It shows the full galaxy from above with a crosshair tracking your camera position. Click anywhere on the minimap to instantly jump to that location.
+
+<!-- GIF PLACEHOLDER
+     Record: Open the minimap (M key). The full galaxy appears in the
+     corner. Click different regions of the minimap and show the
+     main camera jumping to those positions.
+     Duration: 10 seconds. Save as images/minimap.gif -->
+
+![Minimap](images/minimap.gif)
+
+---
+
+### Search
+
+Press `Ctrl+F` or `/` to open the search bar. Type a filename and the camera flies smoothly to that planet. Matching planets are highlighted as you type.
+
+<!-- GIF PLACEHOLDER
+     Record: Press / to open search. Type a filename fragment —
+     show matching planets being highlighted — then press Enter
+     and show the camera smoothly flying to the result.
+     Duration: 8 seconds. Save as images/search.gif -->
+
+![Search and fly-to](images/search.gif)
+
+---
+
+## Installation
+
+Search for **Code Cosmos** in the VS Code Extensions panel (`Ctrl+Shift+X`) and click Install.
+
+Or install from the command line:
+
+```bash
+code --install-extension Yashwanth.code-cosmos
+```
+
+**Requirements:** VS Code 1.120.0 or higher. No other dependencies.
+
+---
+
+## Getting Started
+
+1. Open any project folder in VS Code (`File → Open Folder`)
+2. Open the Command Palette (`Ctrl+Shift+P`)
+3. Run **`Code Cosmos: Open Universe`**
+4. The universe generates automatically — larger projects take a few seconds
+
+> **First time?** The onboarding overlay walks you through the controls. Press `?` at any time to bring it back.
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut         | Action                         |
+| ---------------- | ------------------------------ |
+| `Ctrl+F` or `/`  | Open search                    |
+| `Esc`            | Close search / exit focus mode |
+| `F`              | Toggle pilot (spacecraft) mode |
+| `M`              | Toggle minimap                 |
+| `T`              | Toggle filter panel            |
+| `S`              | Toggle settings panel          |
+| `R`              | Reset camera to home position  |
+| `P`              | Export current view as PNG     |
+| `Ctrl+U` or `F5` | Reload universe                |
+| `?`              | Show all shortcuts             |
+
+---
+
+## Settings
+
+Open the settings panel with `S`. All settings persist between sessions.
+
+| Setting                   | Default | Description                                      |
+| ------------------------- | ------- | ------------------------------------------------ |
+| Direct dependency lines   | On      | Show explicit imports between files              |
+| Indirect dependency lines | Off     | Show transitive (2-hop) connections              |
+| Shared dependency lines   | Off     | Show files used by many modules                  |
+| Circular dependency lines | On      | Show import loops (pulses red)                   |
+| Orbital animation         | Off     | Planets orbit their stars in real time           |
+| Star rotation             | On      | Folder stars rotate on their axis                |
+| Orbital speed             | 1.0×    | Speed multiplier for orbital animation           |
+| Folder labels             | On      | Show folder names above stars                    |
+| Proximity labels          | On      | File names fade in as camera approaches          |
+| Background stars          | On      | Decorative starfield                             |
+| Depth fog                 | On      | Distant objects fade for depth cues              |
+| Git heatmap               | Off     | Colour files by commit frequency                 |
+| Performance mode          | Off     | Instanced rendering for large repos (500+ files) |
+| Minimap                   | Off     | Show 2D overhead minimap                         |
+| Legend                    | On      | Show dependency-type colour legend               |
+
+**Presets:** Three one-click presets are available — **Clean** (minimal, no lines), **Full Detail** (everything on), **Performance** (optimised for large repos).
+
+---
+
+## Excluding Files and Folders
+
+Create a `.cosmosignore` file in your project root to exclude paths from the universe. Uses the same glob syntax as `.gitignore`.
+
+```
+# .cosmosignore
+
+node_modules
+dist
+build
+coverage
+**/*.test.ts
+**/*.spec.js
+*.min.js
+```
+
+Common directories (`node_modules`, `dist`, `.git`, etc.) are excluded by default.
+
+---
+
+## Supported Languages
+
+Code Cosmos parses import and dependency statements for the following languages:
+
+| Language   | Extensions                    |
+| ---------- | ----------------------------- |
+| TypeScript | `.ts`, `.tsx`                 |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| Python     | `.py`                         |
+| Java       | `.java`                       |
+| Rust       | `.rs`                         |
+| Go         | `.go`                         |
+| C / C++    | `.c`, `.cpp`, `.h`, `.hpp`    |
+| Ruby       | `.rb`                         |
+| PHP        | `.php`                        |
+| Swift      | `.swift`                      |
+| Kotlin     | `.kt`                         |
+| HTML       | `.html`                       |
+| CSS / SCSS | `.css`, `.scss`               |
+| Vue        | `.vue`                        |
+| Svelte     | `.svelte`                     |
+
+Files in unsupported formats still appear as planets — they just have no dependency lines.
+
+---
+
+## Performance
+
+Code Cosmos is designed to handle real projects, not just small demos.
+
+| Project size    | Expected behaviour                                        |
+| --------------- | --------------------------------------------------------- |
+| < 200 files     | Instant load, all features enabled                        |
+| 200–500 files   | Loads in 2–5 seconds, smooth at 60 fps                    |
+| 500–1 500 files | Enable **Performance Mode** for best results              |
+| > 1 500 files   | Performance Mode required; parsing may take 10–20 seconds |
+
+**Performance Mode** uses instanced mesh rendering — all planets are drawn in a single GPU draw call. It is automatically suggested for large repos.
+
+---
+
+## Known Limitations
+
+- **Monorepos** — each workspace folder renders as a separate galaxy. Cross-package dependencies between workspace roots are not yet visualised.
+- **Dynamic imports** — `import()` expressions and `require()` calls with variable paths cannot be statically resolved and will not appear as dependency lines.
+- **Very large repos (5 000+ files)** — parsing is slower and frame rate may drop on lower-end hardware even with Performance Mode. Excluding `node_modules`, build output, and test files via `.cosmosignore` significantly improves this.
+
+---
+
+## Roadmap
+
+The current release is v0.1.0 — the foundation. Planned for upcoming releases:
+
+- Genesis animation on first load
+- Path tracing between any two files
+- Named camera bookmarks
+- Per-planet birth and deletion animations
+- Photon particle streams on dependency lines
+- Test coverage visualisation
+- Drag-to-migrate files between folders
+
+See the [open issues](https://github.com/yashwanth-creator02/code-cosmos/issues) for the full list.
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, architecture overview, and how to submit a pull request.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+Built with Three.js · Made for VS Code
+
+</div>
