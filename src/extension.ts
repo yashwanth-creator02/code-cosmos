@@ -6,6 +6,20 @@ import { buildFileTree } from './core/fileTree';
 import { CosmosPanel } from './panel/CosmosPanel';
 import { CosmosData, StarNode } from './types';
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const GALAXY_SPACING = 2000;
+const VERY_LARGE_REPO_THRESHOLD = 1000;
+const LARGE_REPO_THRESHOLD = 500;
+const REBUILD_DEBOUNCE_MS = 5000; // increased from 1.5s — prevents thrashing on active editing
+const EXCLUDED_WATCH_PREFIXES = ['node_modules', '.git', 'dist', 'build', 'out'];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function prefixStarTree(node: StarNode, prefix: string): StarNode {
   return {
     ...node,
@@ -14,6 +28,105 @@ function prefixStarTree(node: StarNode, prefix: string): StarNode {
   };
 }
 
+/**
+ * Single source of truth for building CosmosData across all workspace folders.
+ * Used for both initial load and manual/auto refresh — no duplication.
+ */
+export async function buildAllWorkspaces(
+  workspaceFolders: readonly vscode.WorkspaceFolder[]
+): Promise<CosmosData> {
+  const allData: CosmosData = {
+    files: {},
+    folders: {},
+    dependencies: [],
+    rootFolderId: '.',
+    workspaceRoots: {},
+    starTree: null,
+    gitData: null,
+  };
+
+  for (let i = 0; i < workspaceFolders.length; i++) {
+    const folder = workspaceFolders[i];
+    const offset = {
+      x: (i - (workspaceFolders.length - 1) / 2) * GALAXY_SPACING,
+      y: 0,
+      z: 0,
+    };
+
+    const data = await buildFileTree(folder, offset);
+    const prefix = `${folder.name}:`;
+
+    // Merge workspace roots
+    for (const [name, root] of Object.entries(data.workspaceRoots)) {
+      allData.workspaceRoots[name] = root;
+    }
+
+    // Merge files with workspace prefix
+    for (const [id, file] of Object.entries(data.files)) {
+      allData.files[prefix + id] = {
+        ...file,
+        id: prefix + id,
+        folderId: prefix + file.folderId,
+      };
+    }
+
+    // Merge folders with workspace prefix
+    for (const [id, folderData] of Object.entries(data.folders)) {
+      allData.folders[prefix + id] = {
+        ...folderData,
+        id: prefix + id,
+        parentId: folderData.parentId ? prefix + folderData.parentId : null,
+        fileIds: folderData.fileIds.map((fid) => prefix + fid),
+        childFolderIds: folderData.childFolderIds.map((cid) => prefix + cid),
+      };
+    }
+
+    // Merge dependencies with workspace prefix
+    allData.dependencies.push(
+      ...data.dependencies.map((dep) => ({
+        ...dep,
+        sourceId: prefix + dep.sourceId,
+        targetId: prefix + dep.targetId,
+      }))
+    );
+
+    // Star tree: use first workspace as primary for camera anchor.
+    // Git data: collected from ALL workspaces and merged.
+    // FIX: previously only i === 0 received git data — all roots now contribute.
+    if (i === 0 && data.starTree) {
+      allData.starTree = prefixStarTree(data.starTree, prefix);
+      allData.rootFolderId = prefix + '.';
+    }
+
+    if (data.gitData?.available) {
+      if (!allData.gitData) {
+        // First workspace with git data — use as base
+        allData.gitData = {
+          branch: data.gitData.branch,
+          fileInfo: {},
+          available: true,
+        };
+      }
+      // Merge file info from this workspace into the combined git data,
+      // prefixing all file IDs so they match the merged file map.
+      for (const [fileId, info] of Object.entries(data.gitData.fileInfo)) {
+        allData.gitData.fileInfo[prefix + fileId] = info;
+      }
+    }
+  }
+
+  // If no workspace had git data, ensure gitData is a valid unavailable state
+  if (!allData.gitData) {
+    allData.gitData = { branch: 'unknown', fileInfo: {}, available: false };
+  }
+
+  return allData;
+}
+
+// ---------------------------------------------------------------------------
+// Extension lifecycle
+// ---------------------------------------------------------------------------
+
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context);
   logger.log('Code Cosmos is active');
@@ -21,7 +134,6 @@ export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand('code-cosmos.openCosmos', async () => {
     try {
       logger.log('openCosmos command fired');
-      vscode.window.showInformationMessage('Code Cosmos: Scanning repository...');
 
       const workspaceFolders = vscode.workspace.workspaceFolders || [];
 
@@ -32,69 +144,9 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const GALAXY_SPACING = 2000;
-      const allData: CosmosData = {
-        files: {},
-        folders: {},
-        dependencies: [],
-        rootFolderId: '.',
-        workspaceRoots: {},
-        starTree: null,
-        gitData: null,
-      };
+      vscode.window.showInformationMessage('Code Cosmos: Scanning repository...');
 
-      for (let i = 0; i < workspaceFolders.length; i++) {
-        const folder = workspaceFolders[i];
-        const offset = {
-          x: (i - (workspaceFolders.length - 1) / 2) * GALAXY_SPACING,
-          y: 0,
-          z: 0,
-        };
-
-        const data = await buildFileTree(folder, offset);
-
-        // Use workspace name as prefix — NO double prefix
-        // workspace name = "myapp", prefix = "myapp:"
-        // workspaceRoots key = "myapp" (not "myapp:myapp")
-        const prefix = `${folder.name}:`;
-
-        // Merge workspace roots — key is just the workspace name
-        for (const [name, root] of Object.entries(data.workspaceRoots)) {
-          allData.workspaceRoots[name] = root;
-        }
-
-        for (const [id, file] of Object.entries(data.files)) {
-          allData.files[prefix + id] = {
-            ...file,
-            id: prefix + id,
-            folderId: prefix + file.folderId,
-          };
-        }
-
-        for (const [id, folderData] of Object.entries(data.folders)) {
-          allData.folders[prefix + id] = {
-            ...folderData,
-            id: prefix + id,
-            parentId: folderData.parentId ? prefix + folderData.parentId : null,
-            fileIds: folderData.fileIds.map((fid) => prefix + fid),
-            childFolderIds: folderData.childFolderIds.map((cid) => prefix + cid),
-          };
-        }
-
-        allData.dependencies.push(
-          ...data.dependencies.map((dep) => ({
-            ...dep,
-            sourceId: prefix + dep.sourceId,
-            targetId: prefix + dep.targetId,
-          }))
-        );
-
-        if (i === 0 && data.starTree) {
-          allData.starTree = prefixStarTree(data.starTree, prefix);
-          allData.rootFolderId = prefix + '.';
-          allData.gitData = data.gitData;
-        }
-      }
+      const allData = await buildAllWorkspaces(workspaceFolders);
 
       const fileCount = Object.keys(allData.files).length;
       const folderCount = Object.keys(allData.folders).length;
@@ -107,9 +159,6 @@ export function activate(context: vscode.ExtensionContext) {
         );
         return;
       }
-
-      const VERY_LARGE_REPO_THRESHOLD = 1000;
-      const LARGE_REPO_THRESHOLD = 500;
 
       if (fileCount > VERY_LARGE_REPO_THRESHOLD) {
         const choice = await vscode.window.showWarningMessage(
@@ -132,20 +181,24 @@ export function activate(context: vscode.ExtensionContext) {
         );
       }
 
+      // Open beside the active editor (ViewColumn.Beside) rather than replacing it.
+      // This keeps the cosmos as a companion tool — the developer keeps their code
+      // open on the left and navigates the cosmos on the right simultaneously.
       const panel = CosmosPanel.createOrShow(context.extensionUri, context);
       const savedSettings = panel.getSavedSettings();
+
       panel.setRefreshCallback(async () => {
         logger.log('Manual refresh requested');
         vscode.window.showInformationMessage('Code Cosmos: Refreshing...');
         const freshData = await buildAllWorkspaces(workspaceFolders);
         panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: freshData });
+        logger.log('Refresh complete');
       });
 
       panel.sendSettings(savedSettings);
-
       panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
 
-      // Watch for active editor changes to sync with 3D view
+      // Sync active editor → cosmos focus (beacon chip behaviour)
       const editorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor && CosmosPanel.currentPanel) {
           const uri = editor.document.uri;
@@ -162,50 +215,79 @@ export function activate(context: vscode.ExtensionContext) {
       });
       context.subscriptions.push(editorListener);
 
-      // Watch for file changes in the workspace
+      // File watcher — triggers a stale indicator rather than an immediate rebuild.
+      // Auto-rebuild is debounced to REBUILD_DEBOUNCE_MS (5s) to avoid thrashing
+      // during active editing sessions. The panel also exposes a manual refresh button
+      // for developers who want to control when the cosmos updates.
       const watcher = vscode.workspace.createFileSystemWatcher('**/*');
-
       let debounceTimer: NodeJS.Timeout | null = null;
+      let panelIsVisible = true;
+
+      // Track panel visibility so we skip rebuilds while it's hidden
+      panel.onVisibilityChange((visible) => {
+        panelIsVisible = visible;
+      });
 
       const handleChange = (uri: vscode.Uri) => {
-        // Ignore changes in excluded folders
         const relativePath = vscode.workspace.asRelativePath(uri);
-        const excluded = ['node_modules', '.git', 'dist', 'build', 'out'];
-        if (excluded.some((e) => relativePath.startsWith(e))) {
+
+        // Skip changes in always-excluded directories
+        if (EXCLUDED_WATCH_PREFIXES.some((e) => relativePath.startsWith(e))) {
           return;
         }
 
         logger.log(`File changed: ${relativePath}`);
 
-        // Debounce — wait 1.5s after last change before rebuilding
-        // This prevents rebuilding 50 times during a git checkout
+        // Mark the cosmos as stale immediately so the user knows
+        if (CosmosPanel.currentPanel) {
+          CosmosPanel.currentPanel.sendMessage({ type: 'COSMOS_STALE', payload: {} });
+        }
+
+        // Only schedule a rebuild if the panel is visible — no point rebuilding
+        // a hidden panel that will receive fresh data when it becomes visible.
+        if (!panelIsVisible) {
+          logger.log('Panel hidden — skipping auto-rebuild, will rebuild on next show');
+          return;
+        }
+
         if (debounceTimer) {
           clearTimeout(debounceTimer);
         }
+
         debounceTimer = setTimeout(async () => {
-          logger.log('Rebuilding universe after file change...');
+          logger.log('Auto-rebuilding universe after file change...');
           try {
-            // Rebuild using same logic as initial build
             const freshData = await buildAllWorkspaces(workspaceFolders);
             panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: freshData });
-            logger.log('Universe rebuilt');
+            logger.log('Auto-rebuild complete');
           } catch (err) {
-            logger.error(`Rebuild failed: ${err}`);
+            logger.error(`Auto-rebuild failed: ${err}`);
           }
-        }, 1500);
+        }, REBUILD_DEBOUNCE_MS);
       };
+
+      // On panel becoming visible again after being hidden — rebuild if stale
+      panel.onBecomeVisible(async () => {
+        panelIsVisible = true;
+        logger.log('Panel became visible — rebuilding if stale');
+        try {
+          const freshData = await buildAllWorkspaces(workspaceFolders);
+          panel.sendMessage({ type: 'LOAD_UNIVERSE', payload: freshData });
+        } catch (err) {
+          logger.error(`Visibility rebuild failed: ${err}`);
+        }
+      });
 
       watcher.onDidCreate(handleChange);
       watcher.onDidDelete(handleChange);
       watcher.onDidChange(handleChange);
 
-      // Clean up watcher when panel closes
       panel.onDispose(() => {
         watcher.dispose();
         if (debounceTimer) {
           clearTimeout(debounceTimer);
         }
-        logger.log('File watcher disposed');
+        logger.log('File watcher and panel disposed');
       });
 
       context.subscriptions.push(watcher);
@@ -224,69 +306,4 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   logger.log('Code Cosmos deactivated');
-}
-
-async function buildAllWorkspaces(
-  workspaceFolders: readonly vscode.WorkspaceFolder[]
-): Promise<CosmosData> {
-  const GALAXY_SPACING = 2000;
-  const allData: CosmosData = {
-    files: {},
-    folders: {},
-    dependencies: [],
-    rootFolderId: '.',
-    workspaceRoots: {},
-    starTree: null,
-    gitData: null,
-  };
-
-  for (let i = 0; i < workspaceFolders.length; i++) {
-    const folder = workspaceFolders[i];
-    const offset = {
-      x: (i - (workspaceFolders.length - 1) / 2) * GALAXY_SPACING,
-      y: 0,
-      z: 0,
-    };
-
-    const data = await buildFileTree(folder, offset);
-    const prefix = `${folder.name}:`;
-
-    for (const [name, root] of Object.entries(data.workspaceRoots)) {
-      allData.workspaceRoots[name] = root;
-    }
-
-    for (const [id, file] of Object.entries(data.files)) {
-      allData.files[prefix + id] = {
-        ...file,
-        id: prefix + id,
-        folderId: prefix + file.folderId,
-      };
-    }
-
-    for (const [id, folderData] of Object.entries(data.folders)) {
-      allData.folders[prefix + id] = {
-        ...folderData,
-        id: prefix + id,
-        parentId: folderData.parentId ? prefix + folderData.parentId : null,
-        fileIds: folderData.fileIds.map((fid) => prefix + fid),
-        childFolderIds: folderData.childFolderIds.map((cid) => prefix + cid),
-      };
-    }
-
-    allData.dependencies.push(
-      ...data.dependencies.map((dep) => ({
-        ...dep,
-        sourceId: prefix + dep.sourceId,
-        targetId: prefix + dep.targetId,
-      }))
-    );
-
-    if (i === 0 && data.starTree) {
-      allData.starTree = prefixStarTree(data.starTree, prefix);
-      allData.rootFolderId = prefix + '.';
-      allData.gitData = data.gitData;
-    }
-  }
-
-  return allData;
 }

@@ -6,12 +6,20 @@ import * as fs from 'fs';
 import { CosmosData, SettingsState, DEFAULT_SETTINGS } from '../types';
 import { logger } from '../utils/logger';
 
+// ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
+
 type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
 
 type MessageToWebview =
   | LoadUniverseMessage
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
-  | { type: 'FOCUS_FILE'; payload: { fileId: string } };
+  | { type: 'FOCUS_FILE'; payload: { fileId: string } }
+  | { type: 'COSMOS_STALE'; payload: {} };
+// COSMOS_STALE — tells the webview to show a "stale" indicator so the user
+// knows the cosmos no longer reflects the current file system state.
+// The webview shows a subtle banner; an auto-rebuild or manual refresh clears it.
 
 type MessageFromWebview =
   | { type: 'READY' }
@@ -20,6 +28,10 @@ type MessageFromWebview =
   | { type: 'REFRESH' }
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
 
+// ---------------------------------------------------------------------------
+// CosmosPanel
+// ---------------------------------------------------------------------------
+
 export class CosmosPanel {
   private static instance: CosmosPanel | undefined;
   public static currentPanel: CosmosPanel | undefined;
@@ -27,12 +39,16 @@ export class CosmosPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private readonly context: vscode.ExtensionContext;
+
   private lastLoadMessage: LoadUniverseMessage | null = null;
   private lastUniverseData: CosmosData | null = null;
   private isReady = false;
   private pendingMessage: LoadUniverseMessage | null = null;
   private pendingSettings: SettingsState | null = null;
+
   private disposeCallbacks: (() => void)[] = [];
+  private visibilityChangeCallbacks: ((visible: boolean) => void)[] = [];
+  private becomeVisibleCallbacks: (() => Promise<void>)[] = [];
   private onRefreshCallback: (() => Promise<void>) | null = null;
 
   private constructor(
@@ -47,10 +63,21 @@ export class CosmosPanel {
     this.panel.webview.html = this.getHtmlContent();
     this.panel.onDidDispose(() => this.dispose());
 
+    // Track visibility changes — used by extension to skip rebuilds on hidden panels
     this.panel.onDidChangeViewState((e) => {
-      if (e.webviewPanel.visible && this.lastLoadMessage) {
-        this.panel.webview.postMessage(this.lastLoadMessage);
-        logger.log('Panel became visible — resending universe data');
+      const visible = e.webviewPanel.visible;
+      this.visibilityChangeCallbacks.forEach((cb) => cb(visible));
+
+      if (visible) {
+        // Panel just became visible — trigger rebuild callbacks so data is fresh
+        this.becomeVisibleCallbacks.forEach((cb) => cb());
+
+        // Also re-send last known universe data as an immediate fallback in case
+        // the rebuild hasn't completed yet (the rebuild is async)
+        if (this.lastLoadMessage) {
+          this.panel.webview.postMessage(this.lastLoadMessage);
+          logger.log('Panel became visible — resending last known universe data');
+        }
       }
     });
 
@@ -104,72 +131,26 @@ export class CosmosPanel {
     });
   }
 
-  private async exportImage(dataUrl: string): Promise<void> {
-    try {
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
-      const buffer = Buffer.from(base64, 'base64');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const defaultName = `code-cosmos-${timestamp}.png`;
-
-      const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(
-          path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', defaultName)
-        ),
-        filters: { 'PNG Image': ['png'] },
-        title: 'Save Code Cosmos Screenshot',
-      });
-
-      if (!uri) {
-        return;
-      }
-      await vscode.workspace.fs.writeFile(uri, buffer);
-
-      const open = await vscode.window.showInformationMessage(
-        `Code Cosmos: Screenshot saved`,
-        'Open File',
-        'Show in Explorer'
-      );
-      if (open === 'Open File') {
-        await vscode.commands.executeCommand('vscode.open', uri);
-      } else if (open === 'Show in Explorer') {
-        await vscode.commands.executeCommand('revealFileInOS', uri);
-      }
-    } catch (err) {
-      logger.error(`Export failed: ${err}`);
-    }
-  }
-
-  private async openFile(fileId: string, line?: number, character?: number): Promise<void> {
-    const file = this.lastUniverseData?.files[fileId];
-    if (!file) {
-      return;
-    }
-
-    const options: vscode.TextDocumentShowOptions = {
-      viewColumn: vscode.ViewColumn.Beside,
-      preserveFocus: true,
-    };
-
-    if (line !== undefined && character !== undefined) {
-      const pos = new vscode.Position(line - 1, character - 1);
-      options.selection = new vscode.Range(pos, pos);
-    }
-
-    await vscode.window.showTextDocument(vscode.Uri.file(file.path), options);
-  }
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
 
   public static createOrShow(
     extensionUri: vscode.Uri,
     context: vscode.ExtensionContext
   ): CosmosPanel {
     if (CosmosPanel.instance) {
-      CosmosPanel.instance.panel.reveal();
+      CosmosPanel.instance.panel.reveal(vscode.ViewColumn.Beside);
       return CosmosPanel.instance;
     }
+
+    // ViewColumn.Beside — opens next to the active editor rather than replacing it.
+    // This makes the cosmos a companion: code on the left, cosmos on the right.
+    // preserveFocus: true — keeps the developer's cursor in their code file.
     const panel = vscode.window.createWebviewPanel(
       'codeCosmos',
       'Code Cosmos',
-      vscode.ViewColumn.One,
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       {
         enableScripts: true,
         localResourceRoots: [
@@ -179,6 +160,7 @@ export class CosmosPanel {
         retainContextWhenHidden: true,
       }
     );
+
     CosmosPanel.instance = new CosmosPanel(panel, extensionUri, context);
     CosmosPanel.currentPanel = CosmosPanel.instance;
     return CosmosPanel.instance;
@@ -213,13 +195,84 @@ export class CosmosPanel {
   public onDispose(callback: () => void): void {
     this.disposeCallbacks.push(callback);
   }
+
+  public onVisibilityChange(callback: (visible: boolean) => void): void {
+    this.visibilityChangeCallbacks.push(callback);
+  }
+
+  public onBecomeVisible(callback: () => Promise<void>): void {
+    this.becomeVisibleCallbacks.push(callback);
+  }
+
+  public setRefreshCallback(callback: () => Promise<void>): void {
+    this.onRefreshCallback = callback;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
   private dispose(): void {
     this.disposeCallbacks.forEach((cb) => cb());
     CosmosPanel.instance = undefined;
     CosmosPanel.currentPanel = undefined;
   }
-  public setRefreshCallback(callback: () => Promise<void>): void {
-    this.onRefreshCallback = callback;
+
+  private async openFile(fileId: string, line?: number, character?: number): Promise<void> {
+    const file = this.lastUniverseData?.files[fileId];
+    if (!file) {
+      return;
+    }
+
+    const options: vscode.TextDocumentShowOptions = {
+      // Open file in the first editor column — leaves cosmos panel untouched
+      viewColumn: vscode.ViewColumn.One,
+      preserveFocus: false,
+    };
+
+    if (line !== undefined && character !== undefined) {
+      const pos = new vscode.Position(line - 1, character - 1);
+      options.selection = new vscode.Range(pos, pos);
+    }
+
+    await vscode.window.showTextDocument(vscode.Uri.file(file.path), options);
+  }
+
+  private async exportImage(dataUrl: string): Promise<void> {
+    try {
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const buffer = Buffer.from(base64, 'base64');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const defaultName = `code-cosmos-${timestamp}.png`;
+
+      const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(
+          path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', defaultName)
+        ),
+        filters: { 'PNG Image': ['png'] },
+        title: 'Save Code Cosmos Screenshot',
+      });
+
+      if (!uri) {
+        return;
+      }
+
+      await vscode.workspace.fs.writeFile(uri, buffer);
+
+      const open = await vscode.window.showInformationMessage(
+        'Code Cosmos: Screenshot saved',
+        'Open File',
+        'Show in Explorer'
+      );
+
+      if (open === 'Open File') {
+        await vscode.commands.executeCommand('vscode.open', uri);
+      } else if (open === 'Show in Explorer') {
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+      }
+    } catch (err) {
+      logger.error(`Export failed: ${err}`);
+    }
   }
 
   private getHtmlContent(): string {
