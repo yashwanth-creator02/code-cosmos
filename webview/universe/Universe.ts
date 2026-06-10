@@ -356,7 +356,7 @@ export class Universe {
     this.pathTraceLines = [];
 
     // Compute file size range for LOC-based planet scaling
-    const fileSizes = Object.values(data.files as Record<string, CosmosFile>).map((f) => f.size);
+    const fileSizes = Object.values(data.files).map((f) => f.size);
     const minFileSize = Math.min(...fileSizes, 0);
     const maxFileSize = Math.max(...fileSizes, 1);
 
@@ -1125,7 +1125,7 @@ export class Universe {
         results.style.display = 'none';
         return;
       }
-      const matches = Object.values(this.data.files as Record<string, CosmosFile>)
+      const matches = Object.values(this.data.files)
         .filter((f) => f.name.toLowerCase().includes(query))
         .slice(0, 8);
       if (matches.length === 0) {
@@ -1816,6 +1816,7 @@ export class Universe {
     this.setBeaconVisible(isOffScreen);
   }
 
+
   private setBeaconVisible(visible: boolean): void {
     if (visible === this.beaconVisible) {
       return;
@@ -2011,7 +2012,7 @@ export class Universe {
     // Collect all ancestors of A (files that A transitively imports)
     const ancestorsA = new Set<string>();
     const dfsA = (node: string, depth: number) => {
-      if (depth > 20) return;
+      if (depth > 20) { return; }
       for (const neighbor of adj.get(node) ?? []) {
         if (!ancestorsA.has(neighbor)) {
           ancestorsA.add(neighbor);
@@ -2839,7 +2840,7 @@ export class Universe {
 
     const fileInfo = this.gitData?.available ? this.gitData.fileInfo : null;
     const maxCommits = fileInfo
-      ? Math.max(1, ...Object.values(fileInfo as Record<string, { commitCount: number }>).map((f) => f.commitCount))
+      ? Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount))
       : 1;
 
     // For size-based fallback when git is unavailable
@@ -3046,7 +3047,7 @@ export class Universe {
     container.innerHTML = '';
 
     const extensions = new Set<string>();
-    Object.values(data.files as Record<string, CosmosFile>).forEach((f) => extensions.add(f.extension.toLowerCase()));
+    Object.values(data.files).forEach((f) => extensions.add(f.extension.toLowerCase()));
     const sorted = Array.from(extensions).sort();
 
     sorted.forEach((ext) => {
