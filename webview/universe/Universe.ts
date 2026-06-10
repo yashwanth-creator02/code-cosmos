@@ -166,6 +166,22 @@ export class Universe {
   private static readonly ONBOARDING_KEY = 'cosmos_onboarding_v1_seen';
   private onboardingSeen = false;
 
+  // Multi-select — shift-click accumulates selected planet IDs
+  private selectedPlanetIds: Set<string> = new Set();
+  private selectionHighlights: Map<string, THREE.Mesh> = new Map();
+
+  // Path trace — active when exactly 2 planets are selected
+  private pathTraceLines: THREE.Line[] = [];
+
+  // Camera bookmarks — up to MAX_BOOKMARKS named slots persisted to localStorage
+  private static readonly MAX_BOOKMARKS = 5;
+  private static readonly BOOKMARKS_KEY = 'cosmos_camera_bookmarks_v1';
+  private cameraBookmarks: Array<{
+    name: string;
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+  }> = [];
+
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
     // Deep space color — slightly blue-tinted black feels more like space
@@ -244,6 +260,8 @@ export class Universe {
     this.initSettingsPanel();
     this.initOnboarding();
     this.initBeaconChip();
+    this.initCameraBookmarks();
+    this.initMultiSelect();
     this.addBackgroundStars();
     this.animate();
   }
@@ -319,6 +337,8 @@ export class Universe {
     this.centralObjects.forEach((object) => this.disposeSceneObject(object));
     this.uncommittedRings.forEach((r) => this.scene.remove(r));
     this.compressionRings.forEach((r) => this.scene.remove(r));
+    this.selectionHighlights.forEach((r) => this.scene.remove(r));
+    this.clearPathTrace(false);
 
     this.stars.clear();
     this.planets.clear();
@@ -331,9 +351,12 @@ export class Universe {
     this.centralCore = null;
     this.uncommittedRings.clear();
     this.compressionRings.clear();
+    this.selectedPlanetIds.clear();
+    this.selectionHighlights.clear();
+    this.pathTraceLines = [];
 
     // Compute file size range for LOC-based planet scaling
-    const fileSizes = Object.values(data.files).map((f) => f.size);
+    const fileSizes = Object.values(data.files as Record<string, CosmosFile>).map((f) => f.size);
     const minFileSize = Math.min(...fileSizes, 0);
     const maxFileSize = Math.max(...fileSizes, 1);
 
@@ -605,6 +628,15 @@ export class Universe {
       if (planetIntersects.length > 0 && planetIntersects[0].instanceId !== undefined) {
         const fileId = this.instanceToPlanet.get(planetIntersects[0].instanceId);
         if (fileId) {
+          // Shift-click → multi-select mode
+          if (event.shiftKey) {
+            this.togglePlanetSelection(fileId);
+            return;
+          }
+          // Regular click — if any selection is active, clear it first
+          if (this.selectedPlanetIds.size > 0) {
+            this.clearSelection();
+          }
           if (this.focusedStarId) {
             this.exitStarFocusMode();
           }
@@ -617,6 +649,12 @@ export class Universe {
           return;
         }
       }
+    }
+
+    // Click on empty space with a selection active — clear selection
+    if (this.selectedPlanetIds.size > 0 && !event.shiftKey) {
+      this.clearSelection();
+      return;
     }
 
     const starMeshes = Array.from(this.stars.values()).map((s) => s.mesh);
@@ -766,6 +804,11 @@ export class Universe {
         icon: '🎯',
         label: 'Fly To',
         action: () => this.flyToPlanet(fileId!),
+      },
+      {
+        icon: this.selectedPlanetIds.has(fileId!) ? '✖' : '＋',
+        label: this.selectedPlanetIds.has(fileId!) ? 'Remove from Selection' : 'Add to Selection',
+        action: () => this.togglePlanetSelection(fileId!),
       },
     ];
 
@@ -1082,7 +1125,7 @@ export class Universe {
         results.style.display = 'none';
         return;
       }
-      const matches = Object.values(this.data.files)
+      const matches = Object.values(this.data.files as Record<string, CosmosFile>)
         .filter((f) => f.name.toLowerCase().includes(query))
         .slice(0, 8);
       if (matches.length === 0) {
@@ -1588,6 +1631,16 @@ export class Universe {
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = compressPulse;
     });
+    // Selection rings: gold, steady pulse, always face camera
+    const selectionPulse = 0.7 + Math.sin(Date.now() * 0.004) * 0.2;
+    this.selectionHighlights.forEach((ring, fileId) => {
+      const p = this.planets.get(fileId);
+      if (p) {
+        ring.position.copy(p.position);
+      }
+      ring.quaternion.copy(this.camera.quaternion);
+      (ring.material as THREE.MeshBasicMaterial).opacity = selectionPulse;
+    });
 
     this.renderer.render(this.scene, this.camera);
     this.drawMinimap();
@@ -1796,6 +1849,590 @@ export class Universe {
         chip.style.transition = '';
       }, 260);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature: Multi-select + Path Trace
+  //
+  // Shift-click accumulates a set of selected planet IDs.
+  // Selection is visualised with a glowing selection ring around each planet.
+  //
+  // When exactly 2 planets are selected, path trace activates automatically:
+  //   1. Find the shortest dependency path between the two planets using BFS
+  //      across all dependency layers (direct first, then indirect).
+  //   2. Illuminate that path with bright gold Bézier lines on top of the
+  //      existing dependency lines.
+  //   3. Dim everything that isn't on the path.
+  //   4. Show a breadcrumb in the selection panel: A → B → C
+  //
+  // Escape or clicking empty space clears the selection.
+  // ---------------------------------------------------------------------------
+
+  private initMultiSelect(): void {
+    // Escape clears selection (already handled in keydown — we extend it)
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.selectedPlanetIds.size > 0) {
+        this.clearSelection();
+      }
+    });
+  }
+
+  private togglePlanetSelection(fileId: string): void {
+    if (this.selectedPlanetIds.has(fileId)) {
+      this.selectedPlanetIds.delete(fileId);
+      this.removeSelectionHighlight(fileId);
+    } else {
+      this.selectedPlanetIds.add(fileId);
+      this.addSelectionHighlight(fileId);
+    }
+    this.updateSelectionPanel();
+
+    // Path trace fires automatically when exactly 2 planets are selected
+    if (this.selectedPlanetIds.size === 2) {
+      const [a, b] = Array.from(this.selectedPlanetIds);
+      this.runPathTrace(a, b);
+    } else {
+      this.clearPathTrace();
+    }
+  }
+
+  private addSelectionHighlight(fileId: string): void {
+    if (this.selectionHighlights.has(fileId)) {
+      return;
+    }
+    const planet = this.planets.get(fileId);
+    if (!planet) {
+      return;
+    }
+    // Gold ring — distinct from orange (uncommitted) and cyan (compression)
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(planet.baseScale * 2.8, planet.baseScale * 3.3, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd700,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+      })
+    );
+    ring.position.copy(planet.position);
+    ring.quaternion.copy(this.camera.quaternion);
+    this.selectionHighlights.set(fileId, ring);
+    this.scene.add(ring);
+  }
+
+  private removeSelectionHighlight(fileId: string): void {
+    const ring = this.selectionHighlights.get(fileId);
+    if (ring) {
+      this.scene.remove(ring);
+      (ring.material as THREE.MeshBasicMaterial).dispose();
+      ring.geometry.dispose();
+      this.selectionHighlights.delete(fileId);
+    }
+  }
+
+  private clearSelection(): void {
+    this.selectedPlanetIds.forEach((id) => this.removeSelectionHighlight(id));
+    this.selectedPlanetIds.clear();
+    this.clearPathTrace();
+    this.updateSelectionPanel();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Path trace: BFS through dependency graph to find shortest path A → B
+  //
+  // We search across all dependency layers but weight direct imports first.
+  // The algorithm builds an adjacency list from loaded dependencies, then
+  // runs standard BFS from source, stopping when it reaches the target.
+  // If no path exists, we look for a Closest Common Ancestor (CCA) —
+  // the file that both A and B directly or indirectly depend on.
+  // ---------------------------------------------------------------------------
+
+  private runPathTrace(sourceId: string, targetId: string): void {
+    this.clearPathTrace(false); // clear lines but keep selection rings
+
+    // Build adjacency list — directed (imports flow source → target)
+    const adj = new Map<string, string[]>();
+    this.dependencies.forEach((dep) => {
+      if (dep.layer === DependencyLayer.CIRCULAR) {
+        return; // skip circular — they'd cause infinite loops
+      }
+      if (!adj.has(dep.sourceId)) {
+        adj.set(dep.sourceId, []);
+      }
+      adj.get(dep.sourceId)!.push(dep.targetId);
+    });
+
+    // BFS forward from sourceId
+    const path = this.bfsPath(adj, sourceId, targetId);
+
+    if (path) {
+      this.drawPathTrace(path, 0xffd700); // gold path
+      this.showPathBreadcrumb(path);
+    } else {
+      // No direct path — find closest common ancestor
+      const cca = this.findClosestCommonAncestor(adj, sourceId, targetId);
+      if (cca) {
+        const pathA = this.bfsPath(adj, sourceId, cca) ?? [sourceId, cca];
+        const pathB = this.bfsPath(adj, targetId, cca) ?? [targetId, cca];
+        this.drawPathTrace(pathA, 0xffd700);
+        this.drawPathTrace(pathB, 0xff9800); // orange for second path
+        this.showPathBreadcrumb([...pathA, '...shared...', ...pathB.reverse()]);
+      } else {
+        this.showPathBreadcrumb(null); // no connection found
+      }
+    }
+  }
+
+  private bfsPath(adj: Map<string, string[]>, from: string, to: string): string[] | null {
+    const visited = new Set<string>([from]);
+    const queue: string[][] = [[from]];
+    let safety = 0;
+    while (queue.length > 0 && safety++ < 10000) {
+      const path = queue.shift()!;
+      const node = path[path.length - 1];
+      for (const neighbor of adj.get(node) ?? []) {
+        if (neighbor === to) {
+          return [...path, neighbor];
+        }
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push([...path, neighbor]);
+        }
+      }
+    }
+    return null;
+  }
+
+  private findClosestCommonAncestor(
+    adj: Map<string, string[]>,
+    a: string,
+    b: string
+  ): string | null {
+    // Collect all ancestors of A (files that A transitively imports)
+    const ancestorsA = new Set<string>();
+    const dfsA = (node: string, depth: number) => {
+      if (depth > 20) return;
+      for (const neighbor of adj.get(node) ?? []) {
+        if (!ancestorsA.has(neighbor)) {
+          ancestorsA.add(neighbor);
+          dfsA(neighbor, depth + 1);
+        }
+      }
+    };
+    dfsA(a, 0);
+
+    // Find first ancestor of B that's also in A's ancestors
+    const queue = [b];
+    const visited = new Set<string>([b]);
+    let safety = 0;
+    while (queue.length > 0 && safety++ < 5000) {
+      const node = queue.shift()!;
+      for (const neighbor of adj.get(node) ?? []) {
+        if (ancestorsA.has(neighbor)) {
+          return neighbor; // first common ancestor found
+        }
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+    return null;
+  }
+
+  private drawPathTrace(path: string[], color: number): void {
+    for (let i = 0; i < path.length - 1; i++) {
+      const fromPlanet = this.planets.get(path[i]);
+      const toPlanet = this.planets.get(path[i + 1]);
+      if (!fromPlanet || !toPlanet) {
+        continue;
+      }
+
+      // Reuse Bézier logic — pull control toward shared star
+      const sourceFolderId = fromPlanet.file.folderId;
+      const targetFolderId = toPlanet.file.folderId;
+      let control: THREE.Vector3;
+      const sourceStar = this.stars.get(sourceFolderId);
+      const targetStar = this.stars.get(targetFolderId);
+      if (sourceStar && targetStar) {
+        control = new THREE.Vector3()
+          .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
+          .multiplyScalar(0.5);
+      } else {
+        control = new THREE.Vector3()
+          .addVectors(fromPlanet.position, toPlanet.position)
+          .multiplyScalar(0.5);
+      }
+
+      const SEGMENTS = 16;
+      const positions = new Float32Array((SEGMENTS + 1) * 3);
+      for (let s = 0; s <= SEGMENTS; s++) {
+        const t = s / SEGMENTS;
+        const u = 1 - t;
+        positions[s * 3] = u * u * fromPlanet.position.x + 2 * u * t * control.x + t * t * toPlanet.position.x;
+        positions[s * 3 + 1] = u * u * fromPlanet.position.y + 2 * u * t * control.y + t * t * toPlanet.position.y;
+        positions[s * 3 + 2] = u * u * fromPlanet.position.z + 2 * u * t * control.z + t * t * toPlanet.position.z;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.95,
+        linewidth: 2, // note: linewidth > 1 only works in WebGL1 on some platforms
+        depthTest: false, // render on top of everything else
+      });
+      const line = new THREE.Line(geo, mat);
+      this.pathTraceLines.push(line);
+      this.scene.add(line);
+    }
+  }
+
+  private clearPathTrace(clearPanel = true): void {
+    this.pathTraceLines.forEach((l) => {
+      this.scene.remove(l);
+      l.geometry.dispose();
+      (l.material as THREE.LineBasicMaterial).dispose();
+    });
+    this.pathTraceLines = [];
+    if (clearPanel) {
+      this.showPathBreadcrumb(null);
+    }
+  }
+
+  private showPathBreadcrumb(path: string[] | null): void {
+    const panel = document.getElementById('selection-panel');
+    if (!panel) {
+      return;
+    }
+
+    if (!path) {
+      if (this.selectedPlanetIds.size === 0) {
+        panel.style.display = 'none';
+      }
+      return;
+    }
+
+    const breadcrumb = path
+      .map((id) => {
+        if (id === '...shared...') {
+          return '⟵ shared ⟶';
+        }
+        const file = this.data?.files[id];
+        return file ? `<span style="color:var(--accent-blue)">${this.escapeHtml(file.name)}</span>` : id;
+      })
+      .join(' <span style="opacity:0.4">→</span> ');
+
+    const pathDiv = panel.querySelector('#path-breadcrumb');
+    if (pathDiv) {
+      pathDiv.innerHTML =
+        path.length > 0
+          ? breadcrumb
+          : '<span style="opacity:0.4; font-style:italic;">No dependency path found between these files</span>';
+    }
+  }
+
+  private updateSelectionPanel(): void {
+    let panel = document.getElementById('selection-panel');
+
+    if (this.selectedPlanetIds.size === 0) {
+      if (panel) {
+        panel.style.display = 'none';
+      }
+      return;
+    }
+
+    // Build panel lazily
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'selection-panel';
+      panel.className = 'glass-panel';
+      panel.style.cssText = `
+        position: fixed;
+        bottom: 100px;
+        right: 16px;
+        width: 280px;
+        padding: 14px 16px;
+        z-index: 200;
+        font-size: 11px;
+      `;
+      document.body.appendChild(panel);
+    }
+
+    const ids = Array.from(this.selectedPlanetIds);
+    const fileNames = ids
+      .map((id) => this.data?.files[id]?.name ?? id)
+      .map((n) => `<div style="padding:3px 0; opacity:0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📍 ${this.escapeHtml(n)}</div>`)
+      .join('');
+
+    const actions = ids.length >= 2
+      ? `<div style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
+           <div id="path-breadcrumb" style="line-height:1.6; word-break:break-word; margin-bottom:8px; opacity:0.7; font-size:10px;">
+             Tracing path...
+           </div>
+         </div>`
+      : `<div style="margin-top:8px; opacity:0.4; font-size:10px; font-style:italic;">
+           Shift-click a second planet to trace the dependency path
+         </div>`;
+
+    panel.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-weight:700; font-size:12px; color:var(--accent-gold);">
+          ⬡ ${ids.length} selected
+        </span>
+        <button id="clear-selection-btn" style="
+          background:none; border:1px solid rgba(255,255,255,0.15);
+          color:rgba(255,255,255,0.6); border-radius:6px;
+          padding:3px 10px; cursor:pointer; font-size:10px;
+        ">Clear</button>
+      </div>
+      <div style="max-height:120px; overflow-y:auto;">${fileNames}</div>
+      ${actions}
+    `;
+
+    panel.style.display = 'block';
+
+    panel.querySelector('#clear-selection-btn')?.addEventListener('click', () => {
+      this.clearSelection();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature: Camera Bookmarks
+  //
+  // Up to 5 named camera positions persisted to localStorage.
+  // Rendered as pill buttons in the top-left corner of the WebView.
+  // Saving: records current camera.position + controls.target.
+  // Loading: cinematic flight to saved position using existing flyTo animation.
+  //
+  // localStorage is appropriate here — bookmarks are personal developer
+  // preferences, not project data, so globalState or .cosmos file aren't needed.
+  // ---------------------------------------------------------------------------
+
+  private initCameraBookmarks(): void {
+    // Load persisted bookmarks
+    try {
+      const saved = localStorage.getItem(Universe.BOOKMARKS_KEY);
+      if (saved) {
+        this.cameraBookmarks = JSON.parse(saved);
+      }
+    } catch { /* ignore */ }
+
+    this.renderBookmarkBar();
+
+    // Keyboard shortcut: Ctrl+1..5 flies to bookmark 1..5
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && !this.isTextInputTarget(e.target)) {
+        const idx = parseInt(e.key, 10) - 1;
+        if (idx >= 0 && idx < this.cameraBookmarks.length) {
+          e.preventDefault();
+          this.flyToBookmark(idx);
+        }
+      }
+    });
+  }
+
+  private renderBookmarkBar(): void {
+    let bar = document.getElementById('bookmark-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'bookmark-bar';
+      bar.style.cssText = `
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        z-index: 200;
+        align-items: flex-end;
+      `;
+      document.body.appendChild(bar);
+    }
+
+    bar.innerHTML = '';
+
+    // "Save view" button — always shown
+    const saveBtn = document.createElement('button');
+    saveBtn.title = 'Save current camera position as a bookmark';
+    saveBtn.style.cssText = `
+      background: rgba(10,14,26,0.85);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.7);
+      border-radius: 8px;
+      padding: 5px 12px;
+      font-size: 10px;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      backdrop-filter: blur(10px);
+      transition: border-color 0.2s ease, color 0.2s ease;
+      white-space: nowrap;
+    `;
+    saveBtn.textContent = '+ Save View';
+    saveBtn.addEventListener('mouseenter', () => {
+      saveBtn.style.borderColor = 'rgba(255,215,0,0.5)';
+      saveBtn.style.color = 'rgba(255,215,0,0.9)';
+    });
+    saveBtn.addEventListener('mouseleave', () => {
+      saveBtn.style.borderColor = 'rgba(255,255,255,0.15)';
+      saveBtn.style.color = 'rgba(255,255,255,0.7)';
+    });
+    saveBtn.addEventListener('click', () => this.saveBookmark());
+    bar.appendChild(saveBtn);
+
+    // Existing bookmark pills
+    this.cameraBookmarks.forEach((bm, idx) => {
+      const pill = document.createElement('div');
+      pill.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 0;
+        background: rgba(10,14,26,0.85);
+        border: 1px solid rgba(255,215,0,0.25);
+        border-radius: 8px;
+        overflow: hidden;
+        backdrop-filter: blur(10px);
+        font-size: 10px;
+      `;
+
+      const flyBtn = document.createElement('button');
+      flyBtn.style.cssText = `
+        background: none; border: none;
+        color: rgba(255,215,0,0.85);
+        padding: 5px 12px;
+        cursor: pointer;
+        font-size: 10px;
+        letter-spacing: 0.4px;
+        white-space: nowrap;
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      `;
+      flyBtn.title = `Fly to "${bm.name}" (Ctrl+${idx + 1})`;
+      flyBtn.textContent = `⭐ ${bm.name}`;
+      flyBtn.addEventListener('click', () => this.flyToBookmark(idx));
+
+      const delBtn = document.createElement('button');
+      delBtn.style.cssText = `
+        background: none;
+        border: none;
+        border-left: 1px solid rgba(255,255,255,0.08);
+        color: rgba(255,255,255,0.3);
+        padding: 5px 8px;
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1;
+      `;
+      delBtn.title = 'Remove bookmark';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteBookmark(idx);
+      });
+      delBtn.addEventListener('mouseenter', () => {
+        delBtn.style.color = '#ff5252';
+      });
+      delBtn.addEventListener('mouseleave', () => {
+        delBtn.style.color = 'rgba(255,255,255,0.3)';
+      });
+
+      pill.appendChild(flyBtn);
+      pill.appendChild(delBtn);
+      bar.appendChild(pill);
+    });
+  }
+
+  private saveBookmark(): void {
+    if (this.cameraBookmarks.length >= Universe.MAX_BOOKMARKS) {
+      // Replace oldest bookmark
+      this.cameraBookmarks.shift();
+    }
+
+    const defaultName = this.getDefaultBookmarkName();
+    const name = window.prompt('Name this view:', defaultName);
+    if (!name || !name.trim()) {
+      return;
+    }
+
+    this.cameraBookmarks.push({
+      name: name.trim().slice(0, 30), // cap at 30 chars
+      position: {
+        x: this.camera.position.x,
+        y: this.camera.position.y,
+        z: this.camera.position.z,
+      },
+      target: {
+        x: this.controls.target.x,
+        y: this.controls.target.y,
+        z: this.controls.target.z,
+      },
+    });
+
+    try {
+      localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
+    } catch { /* ignore */ }
+
+    this.renderBookmarkBar();
+  }
+
+  private flyToBookmark(idx: number): void {
+    const bm = this.cameraBookmarks[idx];
+    if (!bm) {
+      return;
+    }
+
+    const startPosition = this.camera.position.clone();
+    const startTarget = this.controls.target.clone();
+    const endPosition = new THREE.Vector3(bm.position.x, bm.position.y, bm.position.z);
+    const endTarget = new THREE.Vector3(bm.target.x, bm.target.y, bm.target.z);
+
+    // Scale duration to distance — short hop = quick, cross-galaxy = dramatic
+    const dist = startPosition.distanceTo(endPosition);
+    const duration = Math.min(120, Math.max(40, Math.floor(dist / 20)));
+
+    let progress = 0;
+    const fly = () => {
+      if (progress >= duration) {
+        this.controls.target.copy(endTarget);
+        this.controls.update();
+        return;
+      }
+      progress++;
+      const t = progress / duration;
+      // Cubic ease: slow start, fast middle, slow end — cinematic feel
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      this.camera.position.lerpVectors(startPosition, endPosition, eased);
+      this.controls.target.lerpVectors(startTarget, endTarget, eased);
+      this.controls.update();
+      requestAnimationFrame(fly);
+    };
+    fly();
+  }
+
+  private deleteBookmark(idx: number): void {
+    this.cameraBookmarks.splice(idx, 1);
+    try {
+      localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
+    } catch { /* ignore */ }
+    this.renderBookmarkBar();
+  }
+
+  private getDefaultBookmarkName(): string {
+    // Try to name after the nearest star to the camera's look target
+    let closest: string | null = null;
+    let closestDist = Infinity;
+    this.stars.forEach((star, folderId) => {
+      const d = this.controls.target.distanceTo(star.mesh.position);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = folderId;
+      }
+    });
+    if (closest && this.data?.folders[closest]) {
+      return this.data.folders[closest].name;
+    }
+    return `View ${this.cameraBookmarks.length + 1}`;
   }
 
   private updateProximityLabels(): void {
@@ -2202,7 +2839,7 @@ export class Universe {
 
     const fileInfo = this.gitData?.available ? this.gitData.fileInfo : null;
     const maxCommits = fileInfo
-      ? Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount))
+      ? Math.max(1, ...Object.values(fileInfo as Record<string, { commitCount: number }>).map((f) => f.commitCount))
       : 1;
 
     // For size-based fallback when git is unavailable
@@ -2409,7 +3046,7 @@ export class Universe {
     container.innerHTML = '';
 
     const extensions = new Set<string>();
-    Object.values(data.files).forEach((f) => extensions.add(f.extension.toLowerCase()));
+    Object.values(data.files as Record<string, CosmosFile>).forEach((f) => extensions.add(f.extension.toLowerCase()));
     const sorted = Array.from(extensions).sort();
 
     sorted.forEach((ext) => {

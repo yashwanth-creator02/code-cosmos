@@ -17,9 +17,9 @@ type MessageToWebview =
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
   | { type: 'COSMOS_STALE'; payload: {} };
-// COSMOS_STALE — tells the webview to show a "stale" indicator so the user
-// knows the cosmos no longer reflects the current file system state.
-// The webview shows a subtle banner; an auto-rebuild or manual refresh clears it.
+  // COSMOS_STALE — tells the webview to show a "stale" indicator so the user
+  // knows the cosmos no longer reflects the current file system state.
+  // The webview shows a subtle banner; an auto-rebuild or manual refresh clears it.
 
 type MessageFromWebview =
   | { type: 'READY' }
