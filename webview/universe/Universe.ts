@@ -78,9 +78,35 @@ interface PlanetData {
   file: CosmosFile;
   position: THREE.Vector3;
   instanceIndex: number;
-  scale: number;
+  scale: number;       // current render scale (may be boosted by git churn)
+  baseScale: number;   // intrinsic LOC-derived scale — never mutated after build
   color: number;
   visible: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Planet size encoding
+//
+// Maps file.size (bytes) → a normalised scale in [MIN_SCALE, MAX_SCALE].
+// Using a logarithmic curve so a 100-byte file and a 1 KB file look
+// meaningfully different, but a 100 KB file and a 500 KB file don't
+// both look enormous. Log base is tunable.
+// ---------------------------------------------------------------------------
+
+const PLANET_MIN_SCALE = 0.5;   // smallest planet (tiny config files, assets)
+const PLANET_MAX_SCALE = 3.0;   // largest planet before compression ring kicks in
+const PLANET_COMPRESS_BYTES = 100_000; // files larger than this get a compression ring
+
+function computePlanetScale(fileSize: number, minSize: number, maxSize: number): number {
+  if (maxSize <= minSize) {
+    return 1.0;
+  }
+  // Logarithmic normalisation — clamp to 1 to avoid log(0)
+  const logSize = Math.log(Math.max(fileSize, 1));
+  const logMin = Math.log(Math.max(minSize, 1));
+  const logMax = Math.log(Math.max(maxSize, 1));
+  const t = (logSize - logMin) / (logMax - logMin); // 0..1
+  return PLANET_MIN_SCALE + t * (PLANET_MAX_SCALE - PLANET_MIN_SCALE);
 }
 
 export class Universe {
@@ -130,6 +156,15 @@ export class Universe {
   private minimapVisible = false;
   private readonly MINIMAP_WORLD_SIZE = 1200;
   private uncommittedRings: Map<string, THREE.Mesh> = new Map();
+  private compressionRings: Map<string, THREE.Mesh> = new Map();
+
+  // Beacon chip — tracks the active editor file when camera drifts away from it
+  private beaconFileId: string | null = null;
+  private beaconVisible = false;
+
+  // Onboarding — shown on first launch, recallable via ? key
+  private static readonly ONBOARDING_KEY = 'cosmos_onboarding_v1_seen';
+  private onboardingSeen = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -183,6 +218,7 @@ export class Universe {
 
     canvas.addEventListener('click', (event) => this.onClick(event, canvas));
     canvas.addEventListener('mousemove', (event) => this.onMouseMove(event, canvas));
+    canvas.addEventListener('contextmenu', (event) => this.onContextMenu(event, canvas));
     canvas.addEventListener('mouseleave', () => {
       const tooltip = document.getElementById('tooltip')!;
       tooltip.style.display = 'none';
@@ -206,6 +242,8 @@ export class Universe {
     this.initRefreshButton();
     this.initFilterBar();
     this.initSettingsPanel();
+    this.initOnboarding();
+    this.initBeaconChip();
     this.addBackgroundStars();
     this.animate();
   }
@@ -280,6 +318,7 @@ export class Universe {
     this.planetLabels.forEach((label) => this.disposeSceneObject(label));
     this.centralObjects.forEach((object) => this.disposeSceneObject(object));
     this.uncommittedRings.forEach((r) => this.scene.remove(r));
+    this.compressionRings.forEach((r) => this.scene.remove(r));
 
     this.stars.clear();
     this.planets.clear();
@@ -291,6 +330,12 @@ export class Universe {
     this.centralObjects = [];
     this.centralCore = null;
     this.uncommittedRings.clear();
+    this.compressionRings.clear();
+
+    // Compute file size range for LOC-based planet scaling
+    const fileSizes = Object.values(data.files).map((f) => f.size);
+    const minFileSize = Math.min(...fileSizes, 0);
+    const maxFileSize = Math.max(...fileSizes, 1);
 
     const fileCount = Object.keys(data.files).length;
     const segments = this.settings.performanceMode ? 6 : 16;
@@ -311,7 +356,7 @@ export class Universe {
     let currentInstanceIndex = 0;
     if (data.starTree) {
       data.starTree.childNodes.forEach((node) => {
-        currentInstanceIndex = this.buildFromNode(node, data, currentInstanceIndex);
+        currentInstanceIndex = this.buildFromNode(node, data, currentInstanceIndex, minFileSize, maxFileSize);
       });
     }
 
@@ -328,17 +373,19 @@ export class Universe {
           80
         );
         const color = FILE_TYPE_COLORS[file.type] || 0x455a64;
+        const baseScale = computePlanetScale(file.size, minFileSize, maxFileSize);
         const planetData: PlanetData = {
           file,
           position,
           instanceIndex: currentInstanceIndex,
-          scale: 1,
+          scale: baseScale,
+          baseScale,
           color,
           visible: true,
         };
         this.planets.set(fileId, planetData);
         this.instanceToPlanet.set(currentInstanceIndex, fileId);
-        this.updateInstance(currentInstanceIndex, position, 1, color);
+        this.updateInstance(currentInstanceIndex, position, baseScale, color);
         this.orbitalData.set(fileId, {
           starPosition: new THREE.Vector3(0, 0, 0),
           angle,
@@ -346,6 +393,9 @@ export class Universe {
           speed: 0.0003 + Math.random() * 0.0001,
           radius: 80,
         });
+        if (file.size > PLANET_COMPRESS_BYTES) {
+          this.addCompressionRing(fileId, position, baseScale);
+        }
         currentInstanceIndex++;
       });
     }
@@ -360,6 +410,9 @@ export class Universe {
     this.applySettingsToScene();
     this.applyGitVisuals();
     this.updateGitHud();
+
+    // Show onboarding guide on first launch, after cosmos is fully built
+    this.showOnboardingIfFirstLaunch();
   }
 
   private updateInstance(
@@ -378,7 +431,7 @@ export class Universe {
     this.planetInstanceMesh.setColorAt(index, new THREE.Color(color));
   }
 
-  private buildFromNode(node: StarNode, data: CosmosData, instanceIndex: number): number {
+  private buildFromNode(node: StarNode, data: CosmosData, instanceIndex: number, minFileSize: number, maxFileSize: number): number {
     const folder = data.folders[node.folderId];
     if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) {
       return instanceIndex;
@@ -418,17 +471,19 @@ export class Universe {
         orbitalRadius
       );
       const color = FILE_TYPE_COLORS[file.type] || 0x455a64;
+      const baseScale = computePlanetScale(file.size, minFileSize, maxFileSize);
       const planetData: PlanetData = {
         file,
         position,
         instanceIndex: nextIndex,
-        scale: 1,
+        scale: baseScale,
+        baseScale,
         color,
         visible: true,
       };
       this.planets.set(fileId, planetData);
       this.instanceToPlanet.set(nextIndex, fileId);
-      this.updateInstance(nextIndex, position, 1, color);
+      this.updateInstance(nextIndex, position, baseScale, color);
       this.orbitalData.set(fileId, {
         starPosition: starPosition.clone(),
         angle,
@@ -436,10 +491,13 @@ export class Universe {
         speed: 0.0002 + Math.random() * 0.0001,
         radius: orbitalRadius,
       });
+      if (file.size > PLANET_COMPRESS_BYTES) {
+        this.addCompressionRing(fileId, position, baseScale);
+      }
       nextIndex++;
     });
     node.childNodes.forEach((childNode) => {
-      nextIndex = this.buildFromNode(childNode, data, nextIndex);
+      nextIndex = this.buildFromNode(childNode, data, nextIndex, minFileSize, maxFileSize);
     });
     return nextIndex;
   }
@@ -473,14 +531,10 @@ export class Universe {
     const ordered = [...dependencies].sort((a, b) => {
       const priority = (l: DependencyLayer) => {
         switch (l) {
-          case DependencyLayer.CIRCULAR:
-            return 0;
-          case DependencyLayer.DIRECT:
-            return 1;
-          case DependencyLayer.INDIRECT:
-            return 2;
-          default:
-            return 3;
+          case DependencyLayer.CIRCULAR: return 0;
+          case DependencyLayer.DIRECT: return 1;
+          case DependencyLayer.INDIRECT: return 2;
+          default: return 3;
         }
       };
       return priority(a.layer) - priority(b.layer);
@@ -502,7 +556,35 @@ export class Universe {
       ) {
         return;
       }
-      const line = new DependencyLine(dep, sourcePlanet.position, targetPlanet.position);
+
+      // Find the nearest shared star to use as the Bézier control hint.
+      // This pulls lines toward their common parent folder, which is the
+      // key insight behind Hierarchical Edge Bundling — lines that share
+      // a parent naturally route through the same region.
+      const sourceFolderId = sourcePlanet.file.folderId;
+      const targetFolderId = targetPlanet.file.folderId;
+      let controlHint: THREE.Vector3 | undefined;
+
+      if (sourceFolderId === targetFolderId) {
+        // Same folder — pull toward the star of that folder
+        const star = this.stars.get(sourceFolderId);
+        if (star) {
+          controlHint = star.mesh.position.clone();
+        }
+      } else {
+        // Different folders — pull toward midpoint of both stars,
+        // or toward the central core if either star isn't found
+        const sourceStar = this.stars.get(sourceFolderId);
+        const targetStar = this.stars.get(targetFolderId);
+        if (sourceStar && targetStar) {
+          controlHint = new THREE.Vector3()
+            .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
+            .multiplyScalar(0.5);
+        }
+        // else: falls back to scene origin (central sun) inside DependencyLine constructor
+      }
+
+      const line = new DependencyLine(dep, sourcePlanet.position, targetPlanet.position, controlHint);
       this.lines.push(line);
       this.scene.add(line.line);
       lineCount++;
@@ -569,6 +651,170 @@ export class Universe {
         return;
       }
     }
+  }
+
+  private onContextMenu(event: MouseEvent, canvas: HTMLCanvasElement): void {
+    event.preventDefault();
+    if (this.spacecraftMode) {
+      return;
+    }
+
+    // Raycast to find what was right-clicked
+    const rect = canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    let fileId: string | null = null;
+
+    if (this.planetInstanceMesh) {
+      const hits = this.raycaster.intersectObject(this.planetInstanceMesh);
+      if (hits.length > 0 && hits[0].instanceId !== undefined) {
+        fileId = this.instanceToPlanet.get(hits[0].instanceId) ?? null;
+      }
+    }
+
+    // Remove any existing context menu
+    document.getElementById('cosmos-context-menu')?.remove();
+
+    if (!fileId || !this.data) {
+      return;
+    }
+
+    const file = this.data.files[fileId];
+    if (!file) {
+      return;
+    }
+
+    // Dependency counts for the passive stat line
+    const depsOut = this.dependencies.filter(
+      (d) => d.sourceId === fileId && d.layer === DependencyLayer.DIRECT
+    ).length;
+    const depsIn = this.dependencies.filter(
+      (d) => d.targetId === fileId && d.layer === DependencyLayer.DIRECT
+    ).length;
+    const isCircular = this.dependencies.some(
+      (d) =>
+        d.layer === DependencyLayer.CIRCULAR &&
+        (d.sourceId === fileId || d.targetId === fileId)
+    );
+
+    // Build menu
+    const menu = document.createElement('div');
+    menu.id = 'cosmos-context-menu';
+    menu.style.cssText = `
+      position: fixed;
+      left: ${event.clientX}px;
+      top: ${event.clientY}px;
+      background: rgba(12, 14, 22, 0.96);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 6px 0;
+      min-width: 220px;
+      z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      backdrop-filter: blur(16px);
+      font-size: 12px;
+      color: rgba(255,255,255,0.9);
+      user-select: none;
+    `;
+
+    // Header — file name + passive stat
+    const header = document.createElement('div');
+    header.style.cssText = `
+      padding: 8px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 4px;
+    `;
+    header.innerHTML = `
+      <div style="font-weight:700; font-size:13px; margin-bottom:3px; color:var(--accent-blue, #64b5f6);">
+        ${this.escapeHtml(file.name)}
+      </div>
+      <div style="opacity:0.45; font-size:10px; letter-spacing:0.3px; margin-bottom:6px;">
+        ${this.escapeHtml(file.relativePath)}
+      </div>
+      <div style="font-size:10px; opacity:0.6;">
+        ↑ ${depsOut} imports &nbsp;·&nbsp; ↓ ${depsIn} imported by
+        ${isCircular ? ' &nbsp;<span style="color:#ff1744;">⚠ circular</span>' : ''}
+      </div>
+    `;
+    menu.appendChild(header);
+
+    // Menu items
+    const items: { label: string; icon: string; action: () => void; danger?: boolean }[] = [
+      {
+        icon: '📄',
+        label: 'Open File',
+        action: () => sendToExtension({ type: 'OPEN_FILE', payload: { fileId: fileId! } }),
+      },
+      {
+        icon: '📋',
+        label: 'Copy Path',
+        action: () => {
+          navigator.clipboard?.writeText(file.relativePath).catch(() => { });
+        },
+      },
+      {
+        icon: '🔍',
+        label: 'Show Dependencies',
+        action: () => {
+          this.exitStarFocusMode();
+          this.enterFocusMode(fileId!);
+        },
+      },
+      {
+        icon: '🎯',
+        label: 'Fly To',
+        action: () => this.flyToPlanet(fileId!),
+      },
+    ];
+
+    items.forEach(({ icon, label, action, danger }) => {
+      const item = document.createElement('div');
+      item.style.cssText = `
+        padding: 8px 14px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        transition: background 0.1s ease;
+        color: ${danger ? '#ff5252' : 'rgba(255,255,255,0.88)'};
+        border-radius: 4px;
+        margin: 0 4px;
+      `;
+      item.innerHTML = `<span style="font-size:13px; width:16px; text-align:center;">${icon}</span><span>${label}</span>`;
+      item.addEventListener('mouseenter', () => {
+        item.style.background = 'rgba(255,255,255,0.07)';
+      });
+      item.addEventListener('mouseleave', () => {
+        item.style.background = 'transparent';
+      });
+      item.addEventListener('click', () => {
+        action();
+        menu.remove();
+      });
+      menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+
+    // Auto-adjust if menu clips screen edge
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) {
+      menu.style.left = `${event.clientX - menuRect.width}px`;
+    }
+    if (menuRect.bottom > window.innerHeight) {
+      menu.style.top = `${event.clientY - menuRect.height}px`;
+    }
+
+    // Dismiss on any outside click
+    const dismiss = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) {
+        menu.remove();
+        document.removeEventListener('click', dismiss);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
@@ -866,6 +1112,11 @@ export class Universe {
   }
 
   public focusOnFile(fileId: string): void {
+    // Update beacon tracking — regardless of whether we fly to it,
+    // we now know which file the developer is working on.
+    this.beaconFileId = fileId;
+    this.setBeaconVisible(false); // reset — updateBeaconChip will re-evaluate next frame
+
     if (this.focusedFileId === fileId) {
       return;
     }
@@ -1315,6 +1566,9 @@ export class Universe {
       this.updateProximityLabels();
     }
 
+    // Beacon chip — check every frame whether active file is off-screen
+    this.updateBeaconChip();
+
     const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3;
     this.uncommittedRings.forEach((ring, fileId) => {
       const p = this.planets.get(fileId);
@@ -1323,6 +1577,16 @@ export class Universe {
       }
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = ringPulse;
+    });
+    // Compression rings pulse slower and subtler — they're informational, not urgent
+    const compressPulse = 0.3 + Math.sin(Date.now() * 0.002) * 0.15;
+    this.compressionRings.forEach((ring, fileId) => {
+      const p = this.planets.get(fileId);
+      if (p) {
+        ring.position.copy(p.position);
+      }
+      ring.quaternion.copy(this.camera.quaternion);
+      (ring.material as THREE.MeshBasicMaterial).opacity = compressPulse;
     });
 
     this.renderer.render(this.scene, this.camera);
@@ -1336,10 +1600,25 @@ export class Universe {
       if (!s || !t) {
         return;
       }
-      const pos = depLine.line.geometry.attributes.position;
-      pos.setXYZ(0, s.position.x, s.position.y, s.position.z);
-      pos.setXYZ(1, t.position.x, t.position.y, t.position.z);
-      pos.needsUpdate = true;
+      // Recompute control hint — same logic as drawDependencies
+      const sourceFolderId = s.file.folderId;
+      const targetFolderId = t.file.folderId;
+      let controlHint: THREE.Vector3 | undefined;
+      if (sourceFolderId === targetFolderId) {
+        const star = this.stars.get(sourceFolderId);
+        if (star) {
+          controlHint = star.mesh.position.clone();
+        }
+      } else {
+        const sourceStar = this.stars.get(sourceFolderId);
+        const targetStar = this.stars.get(targetFolderId);
+        if (sourceStar && targetStar) {
+          controlHint = new THREE.Vector3()
+            .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
+            .multiplyScalar(0.5);
+        }
+      }
+      depLine.updateEndpoints(s.position, t.position, controlHint);
     });
   }
 
@@ -1351,6 +1630,172 @@ export class Universe {
       panel.style.display = v ? 'none' : 'block';
       btn.classList.toggle('active', !v);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature: Onboarding overlay
+  //
+  // Shown automatically on first launch (detected via localStorage flag).
+  // Recallable at any time by pressing ? (which previously opened the shortcuts
+  // panel — we keep shortcuts panel too, accessible via the help button).
+  //
+  // localStorage is used here because this is a purely client-side preference —
+  // it doesn't need to round-trip to the extension or the .cosmos file.
+  // The key is versioned (v1) so future redesigns can show it again.
+  // ---------------------------------------------------------------------------
+
+  private initOnboarding(): void {
+    const overlay = document.getElementById('onboarding-overlay')!;
+    const dismissBtn = document.getElementById('onboarding-dismiss')!;
+
+    // Check if first launch
+    try {
+      this.onboardingSeen = !!localStorage.getItem(Universe.ONBOARDING_KEY);
+    } catch {
+      // localStorage unavailable in some VS Code WebView configurations
+      this.onboardingSeen = false;
+    }
+
+    const show = () => {
+      overlay.style.display = 'flex';
+    };
+
+    const hide = () => {
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.4s ease';
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        overlay.style.opacity = '';
+        overlay.style.transition = '';
+      }, 400);
+      try {
+        localStorage.setItem(Universe.ONBOARDING_KEY, '1');
+        this.onboardingSeen = true;
+      } catch { /* ignore */ }
+    };
+
+    dismissBtn.addEventListener('click', hide);
+
+    // Also dismiss on backdrop click (clicking outside the card)
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        hide();
+      }
+    });
+
+    // ? key: toggle onboarding overlay
+    // Replaces the old behavior where ? opened shortcuts panel only.
+    // Now: first ? opens onboarding. If onboarding is visible, ? closes it.
+    // Shortcuts panel remains accessible via the help button (❔) in the control bar.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === '?' && !this.isTextInputTarget(e.target)) {
+        if (overlay.style.display === 'flex') {
+          hide();
+        } else {
+          show();
+        }
+      }
+    });
+
+    // Show on first launch — but only after the cosmos has built (not during loading).
+    // We hook into the build() method via a flag checked in showOnboardingIfFirstLaunch().
+  }
+
+  public showOnboardingIfFirstLaunch(): void {
+    if (!this.onboardingSeen) {
+      const overlay = document.getElementById('onboarding-overlay');
+      if (overlay) {
+        // Small delay so the developer sees the cosmos first, then the guide appears
+        setTimeout(() => {
+          overlay.style.display = 'flex';
+        }, 800);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature: Beacon chip
+  //
+  // A small floating pill at bottom-center that appears when:
+  //   1. An active file is being tracked (set via focusOnFile from FOCUS_FILE message)
+  //   2. The camera is not currently looking at that file's planet
+  //
+  // Shows the filename and invites the developer to click to locate it.
+  // Disappears when the camera flies to the planet or the tracked file changes.
+  //
+  // The proximity check runs in the animate loop via updateBeaconChip().
+  // ---------------------------------------------------------------------------
+
+  private initBeaconChip(): void {
+    const chip = document.getElementById('beacon-chip')!;
+    chip.addEventListener('click', () => {
+      if (this.beaconFileId) {
+        this.flyToPlanet(this.beaconFileId);
+      }
+    });
+  }
+
+  private updateBeaconChip(): void {
+    if (!this.beaconFileId || !this.data) {
+      this.setBeaconVisible(false);
+      return;
+    }
+
+    const planet = this.planets.get(this.beaconFileId);
+    if (!planet) {
+      this.setBeaconVisible(false);
+      return;
+    }
+
+    // Beacon is visible when the tracked planet is far from the camera center.
+    // We use the angle between the camera's forward vector and the direction
+    // to the planet — if it's > 45°, the planet is meaningfully off-screen.
+    const toPlanet = new THREE.Vector3()
+      .subVectors(planet.position, this.camera.position)
+      .normalize();
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    const dot = forward.dot(toPlanet);
+    // dot close to 1 = camera looking directly at planet
+    // dot < 0.7 = planet more than ~45° off-center = show beacon
+    const isOffScreen = dot < 0.7;
+
+    this.setBeaconVisible(isOffScreen);
+  }
+
+  private setBeaconVisible(visible: boolean): void {
+    if (visible === this.beaconVisible) {
+      return;
+    }
+    this.beaconVisible = visible;
+    const chip = document.getElementById('beacon-chip');
+    if (!chip) {
+      return;
+    }
+    if (visible) {
+      const file = this.data?.files[this.beaconFileId!];
+      const nameEl = document.getElementById('beacon-filename');
+      if (nameEl && file) {
+        nameEl.textContent = file.name;
+      }
+      chip.style.display = 'flex';
+      // Slide up into view
+      chip.style.transform = 'translateX(-50%) translateY(12px)';
+      chip.style.opacity = '0';
+      requestAnimationFrame(() => {
+        chip.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        chip.style.transform = 'translateX(-50%) translateY(0)';
+        chip.style.opacity = '1';
+      });
+    } else {
+      chip.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+      chip.style.opacity = '0';
+      chip.style.transform = 'translateX(-50%) translateY(8px)';
+      setTimeout(() => {
+        chip.style.display = 'none';
+        chip.style.transition = '';
+      }, 260);
+    }
   }
 
   private updateProximityLabels(): void {
@@ -1488,6 +1933,13 @@ export class Universe {
       minimapBtn?.click();
     } else if (!this.settings.showMinimap && this.minimapVisible) {
       minimapBtn?.click();
+    }
+
+    // Re-apply planet colors whenever visual settings change — heatmap toggle,
+    // performance mode, etc. all affect how planets are colored.
+    // applyGitVisuals now runs unconditionally (handles no-git case too).
+    if (this.planets.size > 0) {
+      this.applyGitVisuals();
     }
   }
 
@@ -1744,37 +2196,59 @@ export class Universe {
   }
 
   private applyGitVisuals(): void {
-    if (!this.gitData?.available) {
-      return;
-    }
-    const fileInfo = this.gitData.fileInfo;
-    const maxCommits = Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount));
+    // Always apply subtle visual encoding even without git data.
+    // With git: uses real heat scores. Without git: uses file size as a proxy.
+    // This means planets are never all the same color regardless of git availability.
+
+    const fileInfo = this.gitData?.available ? this.gitData.fileInfo : null;
+    const maxCommits = fileInfo
+      ? Math.max(1, ...Object.values(fileInfo).map((f) => f.commitCount))
+      : 1;
+
+    // For size-based fallback when git is unavailable
+    const allSizes = Array.from(this.planets.values()).map((p) => p.file.size);
+    const maxSize = Math.max(1, ...allSizes);
+
     this.planets.forEach((planet, fileId) => {
       const cleanId = fileId.includes(':') ? fileId.split(':').slice(1).join(':') : fileId;
-      const info = fileInfo[cleanId];
-      if (!info) {
-        return;
-      }
+      const info = fileInfo ? (fileInfo[fileId] || fileInfo[cleanId]) : null;
 
-      let scaleFactor = 1;
-      if (info.commitCount > 0) {
-        scaleFactor = 1 + (info.commitCount / maxCommits) * 1.5;
+      // Scale: git churn boost on top of baseScale
+      if (info && info.commitCount > 0) {
+        const churnBoost = (info.commitCount / maxCommits) * 0.5;
+        planet.scale = planet.baseScale * (1 + churnBoost);
+      } else {
+        planet.scale = planet.baseScale;
       }
-      planet.scale = scaleFactor;
 
       let color = new THREE.Color(planet.color);
-      if (this.settings.showGitHeatmap) {
+
+      if (info && this.settings.showGitHeatmap) {
+        // Full heatmap mode — replaces file type color entirely with thermal spectrum
         if (info.heat < 0.5) {
           color.setHSL(0.6 - info.heat * 0.8, 1, 0.5);
         } else {
           color.setHSL(0.2 - (info.heat - 0.5) * 0.4, 1, 0.5);
         }
-      } else {
+      } else if (info) {
+        // Subtle always-on tint — preserves file type color, adds warmth/coolness
+        // Recently touched → slightly brighter/warmer (toward white)
+        // Ancient / untouched → slightly dimmer (cooler)
+        // This gives the cosmos texture without requiring heatmap toggle
         if (info.daysSinceLastChange <= 7) {
-          const recencyFactor = 1 - info.daysSinceLastChange / 7;
-          color.lerp(new THREE.Color(0xffffff), recencyFactor * 0.5);
+          const factor = 1 - info.daysSinceLastChange / 7;
+          color.lerp(new THREE.Color(0xffffff), factor * 0.4);
         } else if (info.daysSinceLastChange > 90) {
-          color.multiplyScalar(0.7);
+          color.multiplyScalar(0.65);
+        }
+      } else {
+        // No git data — use file size as a subtle proxy for importance.
+        // Larger files get a gentle brightness boost so they naturally stand out.
+        const sizeFactor = planet.file.size / maxSize; // 0..1
+        if (sizeFactor > 0.5) {
+          color.lerp(new THREE.Color(0xffffff), (sizeFactor - 0.5) * 0.25);
+        } else if (sizeFactor < 0.1) {
+          color.multiplyScalar(0.75); // tiny files are slightly dimmer
         }
       }
 
@@ -1784,16 +2258,38 @@ export class Universe {
         planet.visible ? planet.scale : 0.0001,
         color.getHex()
       );
-      if (info.hasUncommittedChanges) {
+
+      if (info?.hasUncommittedChanges) {
         this.addUncommittedRing(fileId, planet.position, planet.scale);
       }
     });
+
     if (this.planetInstanceMesh) {
       this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
       if (this.planetInstanceMesh.instanceColor) {
         this.planetInstanceMesh.instanceColor.needsUpdate = true;
       }
     }
+  }
+
+  private addCompressionRing(fileId: string, position: THREE.Vector3, planetScale: number): void {
+    if (this.compressionRings.has(fileId)) {
+      return;
+    }
+    // A thin pulsing band — distinct from uncommitted ring (orange).
+    // Cyan color signals "this planet is rendered smaller than its true size."
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(planetScale * 2.4, planetScale * 2.7, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x00e5ff,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+      })
+    );
+    ring.position.copy(position);
+    this.compressionRings.set(fileId, ring);
+    this.scene.add(ring);
   }
 
   private addUncommittedRing(fileId: string, position: THREE.Vector3, planetScale: number): void {
@@ -1878,12 +2374,30 @@ export class Universe {
 
   private updateGitHud(): void {
     const branchEl = document.getElementById('git-branch');
+    const repoEl = document.getElementById('repo-name');
     const hudEl = document.getElementById('git-hud');
-    if (this.gitData?.available && branchEl && hudEl) {
+    if (!hudEl) {
+      return;
+    }
+
+    // Derive repo name from the workspace root keys in CosmosData.
+    // workspaceRoots is a Record<name, path> — we take the first key as the
+    // display name. Falls back to "Repository" if unavailable.
+    const repoName = this.data
+      ? (Object.keys(this.data.workspaceRoots)[0] ?? 'Repository')
+      : 'Repository';
+
+    if (repoEl) {
+      repoEl.textContent = repoName;
+    }
+
+    if (this.gitData?.available && branchEl) {
       branchEl.textContent = this.gitData.branch;
       hudEl.style.display = 'flex';
-    } else if (hudEl) {
-      hudEl.style.display = 'none';
+    } else if (branchEl) {
+      // Show repo name even when git isn't available
+      branchEl.textContent = 'no git';
+      hudEl.style.display = 'flex';
     }
   }
 
