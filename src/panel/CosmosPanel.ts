@@ -1,4 +1,20 @@
 // src/panel/CosmosPanel.ts
+//
+// Implements a VS Code WebviewViewProvider — Code Cosmos lives in the
+// Activity Bar sidebar as a dedicated panel, not as a floating editor tab.
+//
+// Why sidebar instead of bottom panel:
+//   - The bottom panel (Terminal area) is too height-constrained for a 3D canvas.
+//   - The sidebar gives the developer a resizable, persistent panel that coexists
+//     naturally with the code editor.
+//   - This matches the paradigm of tools like GitLens, GitHub Copilot Chat, etc.
+//
+// The VS Code API flow:
+//   1. package.json registers a viewsContainers entry (Activity Bar icon)
+//      and a views entry (the webview view inside that container).
+//   2. extension.ts registers this class as the provider for that view ID.
+//   3. VS Code calls resolveWebviewView() when the user first opens the panel.
+//   4. From that point on the webview persists (retainContextWhenHidden: true).
 
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -17,9 +33,6 @@ type MessageToWebview =
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
   | { type: 'COSMOS_STALE'; payload: {} };
-  // COSMOS_STALE — tells the webview to show a "stale" indicator so the user
-  // knows the cosmos no longer reflects the current file system state.
-  // The webview shows a subtle banner; an auto-rebuild or manual refresh clears it.
 
 type MessageFromWebview =
   | { type: 'READY' }
@@ -29,14 +42,14 @@ type MessageFromWebview =
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
 
 // ---------------------------------------------------------------------------
-// CosmosPanel
+// CosmosPanel — WebviewViewProvider
 // ---------------------------------------------------------------------------
 
-export class CosmosPanel {
-  private static instance: CosmosPanel | undefined;
+export class CosmosPanel implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'codeCosmos.sidebarView';
   public static currentPanel: CosmosPanel | undefined;
 
-  private readonly panel: vscode.WebviewPanel;
+  private view: vscode.WebviewView | undefined;
   private readonly extensionUri: vscode.Uri;
   private readonly context: vscode.ExtensionContext;
 
@@ -51,54 +64,71 @@ export class CosmosPanel {
   private becomeVisibleCallbacks: (() => Promise<void>)[] = [];
   private onRefreshCallback: (() => Promise<void>) | null = null;
 
-  private constructor(
-    panel: vscode.WebviewPanel,
-    extensionUri: vscode.Uri,
-    context: vscode.ExtensionContext
-  ) {
-    this.panel = panel;
+  constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
     this.extensionUri = extensionUri;
     this.context = context;
+    CosmosPanel.currentPanel = this;
+  }
 
-    this.panel.webview.html = this.getHtmlContent();
-    this.panel.onDidDispose(() => this.dispose());
+  // ---------------------------------------------------------------------------
+  // VS Code calls this when the sidebar panel first becomes visible.
+  // This is the entry point for WebviewViewProvider — equivalent to
+  // createWebviewPanel() in the old tab-based approach.
+  // ---------------------------------------------------------------------------
 
-    // Track visibility changes — used by extension to skip rebuilds on hidden panels
-    this.panel.onDidChangeViewState((e) => {
-      const visible = e.webviewPanel.visible;
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ): void {
+    this.view = webviewView;
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.extensionUri, 'out'),
+        vscode.Uri.joinPath(this.extensionUri, 'webview'),
+      ],
+    };
+
+    webviewView.webview.html = this.getHtmlContent(webviewView.webview);
+
+    // Track visibility — used to skip rebuilds on hidden panel
+    webviewView.onDidChangeVisibility(() => {
+      const visible = webviewView.visible;
       this.visibilityChangeCallbacks.forEach((cb) => cb(visible));
-
       if (visible) {
-        // Panel just became visible — trigger rebuild callbacks so data is fresh
         this.becomeVisibleCallbacks.forEach((cb) => cb());
-
-        // Also re-send last known universe data as an immediate fallback in case
-        // the rebuild hasn't completed yet (the rebuild is async)
+        // Re-send last known data as immediate fallback while async rebuild runs
         if (this.lastLoadMessage) {
-          this.panel.webview.postMessage(this.lastLoadMessage);
-          logger.log('Panel became visible — resending last known universe data');
+          webviewView.webview.postMessage(this.lastLoadMessage);
+          logger.log('Sidebar became visible — resending last universe data');
         }
       }
     });
 
-    this.panel.webview.onDidReceiveMessage(async (message: MessageFromWebview) => {
-      logger.log('Message received from webview', message.type);
+    webviewView.onDidDispose(() => {
+      this.disposeCallbacks.forEach((cb) => cb());
+      this.view = undefined;
+      this.isReady = false;
+      logger.log('Sidebar view disposed');
+    });
 
+    webviewView.webview.onDidReceiveMessage(async (message: MessageFromWebview) => {
+      logger.log('Message from webview:', message.type);
       switch (message.type) {
         case 'READY':
           this.isReady = true;
-          logger.log('Webview is ready');
-
+          logger.log('Webview ready');
           if (this.pendingSettings) {
-            this.panel.webview.postMessage({
+            webviewView.webview.postMessage({
               type: 'APPLY_SETTINGS',
               payload: this.pendingSettings,
             });
             this.pendingSettings = null;
           }
-
           if (this.pendingMessage) {
-            this.panel.webview.postMessage(this.pendingMessage);
+            webviewView.webview.postMessage(this.pendingMessage);
             this.lastLoadMessage = this.pendingMessage;
             this.lastUniverseData = this.pendingMessage.payload;
             this.pendingMessage = null;
@@ -132,52 +162,23 @@ export class CosmosPanel {
   }
 
   // ---------------------------------------------------------------------------
-  // Public API
+  // Public API — same interface as before so extension.ts needs minimal changes
   // ---------------------------------------------------------------------------
-
-  public static createOrShow(
-    extensionUri: vscode.Uri,
-    context: vscode.ExtensionContext
-  ): CosmosPanel {
-    if (CosmosPanel.instance) {
-      CosmosPanel.instance.panel.reveal(vscode.ViewColumn.Beside);
-      return CosmosPanel.instance;
-    }
-
-    // ViewColumn.Beside — opens next to the active editor rather than replacing it.
-    // This makes the cosmos a companion: code on the left, cosmos on the right.
-    // preserveFocus: true — keeps the developer's cursor in their code file.
-    const panel = vscode.window.createWebviewPanel(
-      'codeCosmos',
-      'Code Cosmos',
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-      {
-        enableScripts: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'out'),
-          vscode.Uri.joinPath(extensionUri, 'webview'),
-        ],
-        retainContextWhenHidden: true,
-      }
-    );
-
-    CosmosPanel.instance = new CosmosPanel(panel, extensionUri, context);
-    CosmosPanel.currentPanel = CosmosPanel.instance;
-    return CosmosPanel.instance;
-  }
 
   public sendMessage(message: MessageToWebview): void {
     if (message.type === 'LOAD_UNIVERSE') {
       this.lastLoadMessage = message;
       this.lastUniverseData = message.payload;
-      if (this.isReady) {
-        this.panel.webview.postMessage(message);
+      if (this.isReady && this.view) {
+        this.view.webview.postMessage(message);
       } else {
         this.pendingMessage = message;
       }
       return;
     }
-    this.panel.webview.postMessage(message);
+    if (this.view) {
+      this.view.webview.postMessage(message);
+    }
   }
 
   public getSavedSettings(): SettingsState {
@@ -185,8 +186,8 @@ export class CosmosPanel {
   }
 
   public sendSettings(settings: SettingsState): void {
-    if (this.isReady) {
-      this.panel.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
+    if (this.isReady && this.view) {
+      this.view.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
     } else {
       this.pendingSettings = settings;
     }
@@ -208,33 +209,29 @@ export class CosmosPanel {
     this.onRefreshCallback = callback;
   }
 
+  public reveal(): void {
+    // Focus the sidebar panel — equivalent to old panel.reveal()
+    vscode.commands.executeCommand('codeCosmos.sidebarView.focus');
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
-
-  private dispose(): void {
-    this.disposeCallbacks.forEach((cb) => cb());
-    CosmosPanel.instance = undefined;
-    CosmosPanel.currentPanel = undefined;
-  }
 
   private async openFile(fileId: string, line?: number, character?: number): Promise<void> {
     const file = this.lastUniverseData?.files[fileId];
     if (!file) {
       return;
     }
-
     const options: vscode.TextDocumentShowOptions = {
-      // Open file in the first editor column — leaves cosmos panel untouched
+      // Open in first editor column — leaves sidebar panel untouched
       viewColumn: vscode.ViewColumn.One,
       preserveFocus: false,
     };
-
     if (line !== undefined && character !== undefined) {
       const pos = new vscode.Position(line - 1, character - 1);
       options.selection = new vscode.Range(pos, pos);
     }
-
     await vscode.window.showTextDocument(vscode.Uri.file(file.path), options);
   }
 
@@ -253,18 +250,14 @@ export class CosmosPanel {
         title: 'Save Code Cosmos Screenshot',
       });
 
-      if (!uri) {
-        return;
-      }
+      if (!uri) return;
 
       await vscode.workspace.fs.writeFile(uri, buffer);
-
       const open = await vscode.window.showInformationMessage(
         'Code Cosmos: Screenshot saved',
         'Open File',
         'Show in Explorer'
       );
-
       if (open === 'Open File') {
         await vscode.commands.executeCommand('vscode.open', uri);
       } else if (open === 'Show in Explorer') {
@@ -275,11 +268,11 @@ export class CosmosPanel {
     }
   }
 
-  private getHtmlContent(): string {
-    const scriptUri = this.panel.webview.asWebviewUri(
+  private getHtmlContent(webview: vscode.Webview): string {
+    const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'out', 'webview', 'main.js')
     );
-    const styleUri = this.panel.webview.asWebviewUri(
+    const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'webview', 'style.css')
     );
     const indexPath = path.join(this.extensionUri.fsPath, 'webview', 'index.html');
@@ -289,10 +282,10 @@ export class CosmosPanel {
       '{{cspSource}}',
       `
       default-src 'none';
-      style-src ${this.panel.webview.cspSource} 'unsafe-inline';
-      script-src ${this.panel.webview.cspSource};
-      connect-src ${this.panel.webview.cspSource};
-      img-src ${this.panel.webview.cspSource} data:;
+      style-src ${webview.cspSource} 'unsafe-inline';
+      script-src ${webview.cspSource};
+      connect-src ${webview.cspSource};
+      img-src ${webview.cspSource} data:;
     `
     );
     html = html.replace('{{styleUri}}', styleUri.toString());

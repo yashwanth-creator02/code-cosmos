@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "publisher": "040d8add-70f3-6b3a-a1df-cc025b275cf9",
   "license": "MIT",
-  "icon": "images/icon.png",
+  "icon": "images/logo.png",
   "galleryBanner": {
     "color": "#06060e",
     "theme": "dark"
@@ -41,13 +41,52 @@
       {
         "command": "code-cosmos.openCosmos",
         "title": "Code Cosmos: Open Universe",
-        "icon": "images/icon.png"
+        "icon": "images/logo.png"
+      },
+      {
+        "command": "code-cosmos.refreshCosmos",
+        "title": "Code Cosmos: Refresh",
+        "icon": "$(refresh)"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "code-cosmos-sidebar",
+          "title": "Code Cosmos",
+          "icon": "images/cosmos-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "code-cosmos-sidebar": [
+        {
+          "type": "webview",
+          "id": "codeCosmos.sidebarView",
+          "name": "Universe",
+          "icon": "images/logo.png",
+          "contextualTitle": "Code Cosmos"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "code-cosmos.refreshCosmos",
+          "when": "view == codeCosmos.sidebarView",
+          "group": "navigation"
+        },
+        {
+          "command": "code-cosmos.openCosmos",
+          "when": "view == codeCosmos.sidebarView",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile && npm run build:webview",
-    "start": "npm run compile && npm run build:webview",
+    "start": "npm run compile && npm run build:webview && npm run format",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",

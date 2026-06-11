@@ -78,8 +78,8 @@ interface PlanetData {
   file: CosmosFile;
   position: THREE.Vector3;
   instanceIndex: number;
-  scale: number;       // current render scale (may be boosted by git churn)
-  baseScale: number;   // intrinsic LOC-derived scale — never mutated after build
+  scale: number; // current render scale (may be boosted by git churn)
+  baseScale: number; // intrinsic LOC-derived scale — never mutated after build
   color: number;
   visible: boolean;
 }
@@ -93,8 +93,8 @@ interface PlanetData {
 // both look enormous. Log base is tunable.
 // ---------------------------------------------------------------------------
 
-const PLANET_MIN_SCALE = 0.5;   // smallest planet (tiny config files, assets)
-const PLANET_MAX_SCALE = 3.0;   // largest planet before compression ring kicks in
+const PLANET_MIN_SCALE = 0.5; // smallest planet (tiny config files, assets)
+const PLANET_MAX_SCALE = 3.0; // largest planet before compression ring kicks in
 const PLANET_COMPRESS_BYTES = 100_000; // files larger than this get a compression ring
 
 function computePlanetScale(fileSize: number, minSize: number, maxSize: number): number {
@@ -202,7 +202,7 @@ export class Universe {
       antialias: true,
       preserveDrawingBuffer: true,
     });
-    this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    this.renderer.setSize(canvas.clientWidth || 800, canvas.clientHeight || 600, false);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     // Warm deep-space ambient — not pure white, slightly warm
@@ -241,6 +241,21 @@ export class Universe {
     });
 
     window.addEventListener('resize', () => this.onResize(canvas));
+
+    // ResizeObserver fires after DOM layout is complete with accurate dimensions.
+    // window 'resize' fires before layout and reads stale clientWidth/clientHeight,
+    // causing the renderer to set itself to 0×0 and produce a blank canvas on resize.
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          this.camera.aspect = width / height;
+          this.camera.updateProjectionMatrix();
+          this.renderer.setSize(width, height, false);
+        }
+      }
+    });
+    resizeObserver.observe(canvas);
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         this.exitFocusMode();
@@ -379,7 +394,13 @@ export class Universe {
     let currentInstanceIndex = 0;
     if (data.starTree) {
       data.starTree.childNodes.forEach((node) => {
-        currentInstanceIndex = this.buildFromNode(node, data, currentInstanceIndex, minFileSize, maxFileSize);
+        currentInstanceIndex = this.buildFromNode(
+          node,
+          data,
+          currentInstanceIndex,
+          minFileSize,
+          maxFileSize
+        );
       });
     }
 
@@ -454,7 +475,13 @@ export class Universe {
     this.planetInstanceMesh.setColorAt(index, new THREE.Color(color));
   }
 
-  private buildFromNode(node: StarNode, data: CosmosData, instanceIndex: number, minFileSize: number, maxFileSize: number): number {
+  private buildFromNode(
+    node: StarNode,
+    data: CosmosData,
+    instanceIndex: number,
+    minFileSize: number,
+    maxFileSize: number
+  ): number {
     const folder = data.folders[node.folderId];
     if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) {
       return instanceIndex;
@@ -543,9 +570,15 @@ export class Universe {
   }
 
   private onResize(canvas: HTMLCanvasElement): void {
-    this.camera.aspect = canvas.clientWidth / canvas.clientHeight;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    // Guard against zero dimensions during layout transitions
+    if (width === 0 || height === 0) {
+      return;
+    }
+    this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    this.renderer.setSize(width, height, false);
   }
 
   private drawDependencies(dependencies: CosmosDependency[]): void {
@@ -554,10 +587,14 @@ export class Universe {
     const ordered = [...dependencies].sort((a, b) => {
       const priority = (l: DependencyLayer) => {
         switch (l) {
-          case DependencyLayer.CIRCULAR: return 0;
-          case DependencyLayer.DIRECT: return 1;
-          case DependencyLayer.INDIRECT: return 2;
-          default: return 3;
+          case DependencyLayer.CIRCULAR:
+            return 0;
+          case DependencyLayer.DIRECT:
+            return 1;
+          case DependencyLayer.INDIRECT:
+            return 2;
+          default:
+            return 3;
         }
       };
       return priority(a.layer) - priority(b.layer);
@@ -607,7 +644,12 @@ export class Universe {
         // else: falls back to scene origin (central sun) inside DependencyLine constructor
       }
 
-      const line = new DependencyLine(dep, sourcePlanet.position, targetPlanet.position, controlHint);
+      const line = new DependencyLine(
+        dep,
+        sourcePlanet.position,
+        targetPlanet.position,
+        controlHint
+      );
       this.lines.push(line);
       this.scene.add(line.line);
       lineCount++;
@@ -651,11 +693,9 @@ export class Universe {
       }
     }
 
-    // Click on empty space with a selection active — clear selection
-    if (this.selectedPlanetIds.size > 0 && !event.shiftKey) {
-      this.clearSelection();
-      return;
-    }
+    // NOTE: clicking empty space no longer clears selection.
+    // Selection is now persistent — only Escape or the Clear button dismisses it.
+    // This prevents accidental dismissal when clicking to pan/rotate the cosmos.
 
     const starMeshes = Array.from(this.stars.values()).map((s) => s.mesh);
     const starIntersects = this.raycaster.intersectObjects(starMeshes);
@@ -733,8 +773,7 @@ export class Universe {
     ).length;
     const isCircular = this.dependencies.some(
       (d) =>
-        d.layer === DependencyLayer.CIRCULAR &&
-        (d.sourceId === fileId || d.targetId === fileId)
+        d.layer === DependencyLayer.CIRCULAR && (d.sourceId === fileId || d.targetId === fileId)
     );
 
     // Build menu
@@ -789,7 +828,7 @@ export class Universe {
         icon: '📋',
         label: 'Copy Path',
         action: () => {
-          navigator.clipboard?.writeText(file.relativePath).catch(() => { });
+          navigator.clipboard?.writeText(file.relativePath).catch(() => {});
         },
       },
       {
@@ -1110,7 +1149,8 @@ export class Universe {
         const panel = document.getElementById('shortcuts-panel')!;
         panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
       }
-      if ((e.key === 's' || e.key === 'S') && !isTyping && !e.ctrlKey) {
+      if ((e.key === 'g' || e.key === 'G') && !isTyping && !e.ctrlKey) {
+        // G = Gear = Settings. S was conflicting with spacecraft backward movement.
         const sp = document.getElementById('settings-panel')!;
         sp.style.display = sp.style.display === 'block' ? 'none' : 'block';
       }
@@ -1455,24 +1495,48 @@ export class Universe {
   }
 
   private initSpacecraftMode(): void {
+    const MOVEMENT_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'shift']);
+
     window.addEventListener('keydown', (e) => {
-      if (!this.isTextInputTarget(e.target)) {
-        this.keys[e.key.toLowerCase()] = true;
-        if (e.key === 'f' && !e.ctrlKey) {
-          this.spacecraftMode = !this.spacecraftMode;
-          this.controls.enabled = !this.spacecraftMode;
-          this.showModeIndicator(this.spacecraftMode);
+      if (this.isTextInputTarget(e.target)) {
+        return;
+      }
+
+      // Toggle spacecraft mode with F
+      if (e.key === 'f' && !e.ctrlKey) {
+        this.spacecraftMode = !this.spacecraftMode;
+        this.controls.enabled = !this.spacecraftMode;
+        this.showModeIndicator(this.spacecraftMode);
+
+        // Clear all movement keys when toggling — prevents phantom movement
+        // caused by keys pressed before entering spacecraft mode (e.g. S from settings)
+        if (this.spacecraftMode) {
+          Object.keys(this.keys).forEach((k) => {
+            this.keys[k] = false;
+          });
         }
       }
+
+      // Only register movement keys when spacecraft mode is active.
+      // This is the core fix: pressing S to open settings no longer primes
+      // the spacecraft backward key, because keys are only written in spacecraft mode.
+      if (this.spacecraftMode && MOVEMENT_KEYS.has(e.key.toLowerCase())) {
+        this.keys[e.key.toLowerCase()] = true;
+      }
     });
+
     window.addEventListener('keyup', (e) => {
+      // Always clear on keyup regardless of mode — prevents stuck keys
+      // if the user releases a key after exiting spacecraft mode
       this.keys[e.key.toLowerCase()] = false;
     });
+
     this.renderer.domElement.addEventListener('click', () => {
       if (this.spacecraftMode) {
         this.renderer.domElement.requestPointerLock();
       }
     });
+
     document.addEventListener('mousemove', (e) => {
       if (!this.spacecraftMode || document.pointerLockElement !== this.renderer.domElement) {
         return;
@@ -1486,6 +1550,7 @@ export class Universe {
       );
       this.camera.quaternion.copy(q);
     });
+
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== this.renderer.domElement) {
         const euler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
@@ -1533,8 +1598,8 @@ export class Universe {
       return;
     }
     indicator.textContent = spacecraft
-      ? '🚀 Pilot Mode — WASD to Fly, Click to Capture'
-      : '🔭 Orbit Mode — Press F to Switch';
+      ? '🚀 Pilot Mode — WASD to fly · F to exit'
+      : '🔭 Orbit Mode — F for Pilot Mode · G for Settings';
     indicator.style.opacity = '1';
     indicator.style.transform = 'translateY(0)';
     setTimeout(() => {
@@ -1724,7 +1789,9 @@ export class Universe {
       try {
         localStorage.setItem(Universe.ONBOARDING_KEY, '1');
         this.onboardingSeen = true;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
 
     dismissBtn.addEventListener('click', hide);
@@ -1815,7 +1882,6 @@ export class Universe {
 
     this.setBeaconVisible(isOffScreen);
   }
-
 
   private setBeaconVisible(visible: boolean): void {
     if (visible === this.beaconVisible) {
@@ -2012,7 +2078,9 @@ export class Universe {
     // Collect all ancestors of A (files that A transitively imports)
     const ancestorsA = new Set<string>();
     const dfsA = (node: string, depth: number) => {
-      if (depth > 20) { return; }
+      if (depth > 20) {
+        return;
+      }
       for (const neighbor of adj.get(node) ?? []) {
         if (!ancestorsA.has(neighbor)) {
           ancestorsA.add(neighbor);
@@ -2070,9 +2138,12 @@ export class Universe {
       for (let s = 0; s <= SEGMENTS; s++) {
         const t = s / SEGMENTS;
         const u = 1 - t;
-        positions[s * 3] = u * u * fromPlanet.position.x + 2 * u * t * control.x + t * t * toPlanet.position.x;
-        positions[s * 3 + 1] = u * u * fromPlanet.position.y + 2 * u * t * control.y + t * t * toPlanet.position.y;
-        positions[s * 3 + 2] = u * u * fromPlanet.position.z + 2 * u * t * control.z + t * t * toPlanet.position.z;
+        positions[s * 3] =
+          u * u * fromPlanet.position.x + 2 * u * t * control.x + t * t * toPlanet.position.x;
+        positions[s * 3 + 1] =
+          u * u * fromPlanet.position.y + 2 * u * t * control.y + t * t * toPlanet.position.y;
+        positions[s * 3 + 2] =
+          u * u * fromPlanet.position.z + 2 * u * t * control.z + t * t * toPlanet.position.z;
       }
 
       const geo = new THREE.BufferGeometry();
@@ -2121,7 +2192,9 @@ export class Universe {
           return '⟵ shared ⟶';
         }
         const file = this.data?.files[id];
-        return file ? `<span style="color:var(--accent-blue)">${this.escapeHtml(file.name)}</span>` : id;
+        return file
+          ? `<span style="color:var(--accent-blue)">${this.escapeHtml(file.name)}</span>`
+          : id;
       })
       .join(' <span style="opacity:0.4">→</span> ');
 
@@ -2164,16 +2237,20 @@ export class Universe {
     const ids = Array.from(this.selectedPlanetIds);
     const fileNames = ids
       .map((id) => this.data?.files[id]?.name ?? id)
-      .map((n) => `<div style="padding:3px 0; opacity:0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📍 ${this.escapeHtml(n)}</div>`)
+      .map(
+        (n) =>
+          `<div style="padding:3px 0; opacity:0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📍 ${this.escapeHtml(n)}</div>`
+      )
       .join('');
 
-    const actions = ids.length >= 2
-      ? `<div style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
+    const actions =
+      ids.length >= 2
+        ? `<div style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
            <div id="path-breadcrumb" style="line-height:1.6; word-break:break-word; margin-bottom:8px; opacity:0.7; font-size:10px;">
              Tracing path...
            </div>
          </div>`
-      : `<div style="margin-top:8px; opacity:0.4; font-size:10px; font-style:italic;">
+        : `<div style="margin-top:8px; opacity:0.4; font-size:10px; font-style:italic;">
            Shift-click a second planet to trace the dependency path
          </div>`;
 
@@ -2218,7 +2295,9 @@ export class Universe {
       if (saved) {
         this.cameraBookmarks = JSON.parse(saved);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     this.renderBookmarkBar();
 
@@ -2346,35 +2425,112 @@ export class Universe {
 
   private saveBookmark(): void {
     if (this.cameraBookmarks.length >= Universe.MAX_BOOKMARKS) {
-      // Replace oldest bookmark
       this.cameraBookmarks.shift();
     }
 
     const defaultName = this.getDefaultBookmarkName();
-    const name = window.prompt('Name this view:', defaultName);
-    if (!name || !name.trim()) {
-      return;
-    }
 
-    this.cameraBookmarks.push({
-      name: name.trim().slice(0, 30), // cap at 30 chars
-      position: {
-        x: this.camera.position.x,
-        y: this.camera.position.y,
-        z: this.camera.position.z,
-      },
-      target: {
-        x: this.controls.target.x,
-        y: this.controls.target.y,
-        z: this.controls.target.z,
-      },
+    // VS Code WebView blocks window.prompt() — build an inline dialog instead.
+    const existing = document.getElementById('bookmark-name-dialog');
+    if (existing) existing.remove();
+
+    const dialog = document.createElement('div');
+    dialog.id = 'bookmark-name-dialog';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      background: rgba(10, 14, 26, 0.97);
+      border: 1px solid rgba(255, 215, 0, 0.35);
+      border-radius: 12px;
+      padding: 16px;
+      z-index: 9999;
+      width: 220px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      backdrop-filter: blur(16px);
+      font-size: 12px;
+    `;
+
+    dialog.innerHTML = `
+      <div style="font-weight:700; margin-bottom:10px; color:var(--accent-gold); font-size:11px; letter-spacing:0.5px;">
+        NAME THIS VIEW
+      </div>
+      <input id="bookmark-name-input" type="text"
+        value="${this.escapeHtml(defaultName)}"
+        maxlength="30"
+        style="
+          width: 100%; box-sizing: border-box;
+          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.2);
+          border-radius: 8px; padding: 8px 10px;
+          color: white; font-size: 12px; outline: none;
+          margin-bottom: 10px;
+        "
+      />
+      <div style="display:flex; gap:8px;">
+        <button id="bookmark-save-confirm" style="
+          flex:1; background: var(--accent-gold); border:none;
+          border-radius:8px; padding:7px; cursor:pointer;
+          font-size:11px; font-weight:700; color:#000;
+        ">Save</button>
+        <button id="bookmark-save-cancel" style="
+          flex:1; background:rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,0.15);
+          border-radius:8px; padding:7px; cursor:pointer;
+          font-size:11px; color:rgba(255,255,255,0.7);
+        ">Cancel</button>
+      </div>
+    `;
+
+    document.body.appendChild(dialog);
+
+    const input = document.getElementById('bookmark-name-input') as HTMLInputElement;
+    // Select all text so user can immediately type a new name
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+
+    const confirm = () => {
+      const name = input.value.trim().slice(0, 30);
+      dialog.remove();
+      if (!name) return;
+
+      this.cameraBookmarks.push({
+        name,
+        position: {
+          x: this.camera.position.x,
+          y: this.camera.position.y,
+          z: this.camera.position.z,
+        },
+        target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
+      });
+
+      try {
+        localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
+      } catch {
+        /* ignore */
+      }
+
+      this.renderBookmarkBar();
+    };
+
+    const cancel = () => dialog.remove();
+
+    document.getElementById('bookmark-save-confirm')?.addEventListener('click', confirm);
+    document.getElementById('bookmark-save-cancel')?.addEventListener('click', cancel);
+
+    // Enter confirms, Escape cancels
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirm();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancel();
+      }
     });
-
-    try {
-      localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
-    } catch { /* ignore */ }
-
-    this.renderBookmarkBar();
   }
 
   private flyToBookmark(idx: number): void {
@@ -2415,7 +2571,9 @@ export class Universe {
     this.cameraBookmarks.splice(idx, 1);
     try {
       localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     this.renderBookmarkBar();
   }
 
@@ -2849,7 +3007,7 @@ export class Universe {
 
     this.planets.forEach((planet, fileId) => {
       const cleanId = fileId.includes(':') ? fileId.split(':').slice(1).join(':') : fileId;
-      const info = fileInfo ? (fileInfo[fileId] || fileInfo[cleanId]) : null;
+      const info = fileInfo ? fileInfo[fileId] || fileInfo[cleanId] : null;
 
       // Scale: git churn boost on top of baseScale
       if (info && info.commitCount > 0) {
