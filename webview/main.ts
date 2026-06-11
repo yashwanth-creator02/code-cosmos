@@ -78,6 +78,19 @@ onMessageFromExtension((message: any) => {
       const loadingText = document.getElementById('loading-text');
       if (loadingText) {
         loadingText.textContent = 'Building universe...';
+        loadingText.style.color = '';   // reset any previous error colour
+        loadingText.style.fontSize = '';
+      }
+
+      // Show overlay if it was hidden (subsequent rebuild)
+      const loadingOverlay = document.getElementById('loading-overlay');
+      if (loadingOverlay && loadingOverlay.style.display === 'none') {
+        loadingOverlay.style.opacity = '0';
+        loadingOverlay.style.display = 'flex';
+        requestAnimationFrame(() => {
+          loadingOverlay.style.transition = 'opacity 0.3s ease';
+          loadingOverlay.style.opacity = '1';
+        });
       }
 
       const doBuild = () => {
@@ -99,11 +112,17 @@ onMessageFromExtension((message: any) => {
               }, 800);
             }
           } catch (err) {
-            console.error('[Code Cosmos Webview] Build failed:', err);
+            // Show error in the loading overlay rather than silently failing
+            const overlay = document.getElementById('loading-overlay');
             const textEl = document.getElementById('loading-text');
+            if (overlay) {
+              overlay.style.display = 'flex';
+              overlay.style.opacity = '1';
+            }
             if (textEl) {
-              textEl.textContent = `Error: ${err}`;
-              textEl.style.color = '#FF1744';
+              textEl.textContent = `Failed to build cosmos: ${err}`;
+              textEl.style.color = '#ff5252';
+              textEl.style.fontSize = '12px';
             }
           }
         }, 100);

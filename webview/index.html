@@ -8,13 +8,8 @@
     <link rel="stylesheet" href="{{styleUri}}" />
   </head>
 
-  <body
-    style="margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #020408"
-  >
-    <canvas
-      id="cosmos-canvas"
-      style="position: absolute; inset: 0; width: 100%; height: 100%; display: block"
-    ></canvas>
+  <body style="margin:0; padding:0; overflow:hidden; width:100%; height:100%; background:#020408;">
+    <canvas id="cosmos-canvas" style="position:absolute; inset:0; width:100%; height:100%; display:block;"></canvas>
 
     <!-- Loading overlay -->
     <div
@@ -87,12 +82,9 @@
         gap: 10px;
       "
     >
-      <span
-        id="repo-name"
-        style="font-weight: 700; font-size: 13px; color: var(--accent-gold); letter-spacing: 0.3px"
-      ></span>
-      <span style="opacity: 0.25; font-size: 10px">·</span>
-      <span style="opacity: 0.5; font-size: 11px">&#x2387;</span>
+      <span id="repo-name" style="font-weight:700; font-size:13px; color:var(--accent-gold); letter-spacing:0.3px;"></span>
+      <span style="opacity:0.25; font-size:10px;">·</span>
+      <span style="opacity:0.5; font-size:11px;">&#x2387;</span>
       <span
         id="git-branch"
         style="font-weight: 600; letter-spacing: 0.5px; color: var(--accent-blue)"
@@ -680,284 +672,129 @@
       </div>
     </div>
 
-    <!-- Onboarding overlay — shown on first launch, recallable via ? key -->
-    <div
-      id="onboarding-overlay"
-      style="
-        position: fixed;
-        inset: 0;
-        background: rgba(2, 4, 8, 0.88);
-        backdrop-filter: blur(12px);
-        z-index: 2000;
-        display: none;
-        align-items: center;
-        justify-content: center;
-      "
-    >
-      <div
-        class="glass-panel"
-        style="
-          max-width: 520px;
-          width: 90%;
-          padding: 40px 44px;
-          text-align: center;
-          border-radius: 20px;
-        "
-      >
-        <!-- Logo pulse -->
-        <div
-          style="
-            width: 64px;
-            height: 64px;
-            border-radius: 50%;
-            background: radial-gradient(circle, #fff5c0, #ffaa00, #ff4400);
-            box-shadow:
-              0 0 30px #ffaa00,
-              0 0 60px #ff6600;
-            margin: 0 auto 24px;
-            animation: pulse 1.5s ease-in-out infinite;
-          "
-        ></div>
 
-        <div style="font-size: 22px; font-weight: 800; letter-spacing: 2px; margin-bottom: 6px">
+    <!-- Onboarding overlay — shown on first launch, recallable via ? key -->
+    <div id="onboarding-overlay" style="
+      position: fixed; inset: 0;
+      background: rgba(2, 4, 8, 0.88);
+      backdrop-filter: blur(12px);
+      z-index: 2000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div class="glass-panel" style="
+        max-width: 480px;
+        width: calc(100% - 32px);
+        padding: 28px 24px;
+        text-align: center;
+        border-radius: 20px;
+        box-sizing: border-box;
+      ">
+        <!-- Logo pulse -->
+        <div style="
+          width: 64px; height: 64px; border-radius: 50%;
+          background: radial-gradient(circle, #fff5c0, #ffaa00, #ff4400);
+          box-shadow: 0 0 30px #ffaa00, 0 0 60px #ff6600;
+          margin: 0 auto 24px;
+          animation: pulse 1.5s ease-in-out infinite;
+        "></div>
+
+        <div style="font-size: 22px; font-weight: 800; letter-spacing: 2px; margin-bottom: 6px;">
           CODE COSMOS
         </div>
-        <div style="font-size: 12px; opacity: 0.4; letter-spacing: 3px; margin-bottom: 32px">
+        <div style="font-size: 12px; opacity: 0.4; letter-spacing: 3px; margin-bottom: 32px;">
           YOUR CODEBASE AS A UNIVERSE
         </div>
 
         <!-- Four concept cards -->
-        <div
-          style="
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 32px;
-            text-align: left;
-          "
-        >
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🌟</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Stars</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Folders &amp; modules. Size reflects how many files they contain.
-            </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 24px; text-align: left;">
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+            <div style="font-size: 22px; margin-bottom: 8px;">🌟</div>
+            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">Stars</div>
+            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5;">Folders &amp; modules. Size reflects how many files they contain.</div>
           </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🪐</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Planets</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Individual files. Size = file weight. Brightness = recent activity.
-            </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+            <div style="font-size: 22px; margin-bottom: 8px;">🪐</div>
+            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">Planets</div>
+            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5;">Individual files. Size = file weight. Brightness = recent activity.</div>
           </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">✨</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Lines</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Imports between files. Red lines = circular dependencies.
-            </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+            <div style="font-size: 22px; margin-bottom: 8px;">✨</div>
+            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">Lines</div>
+            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5;">Imports between files. Red lines = circular dependencies.</div>
           </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🔥</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Heat</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Brighter planets = touched recently. Dimmer = stable or unused.
-            </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+            <div style="font-size: 22px; margin-bottom: 8px;">🔥</div>
+            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">Heat</div>
+            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5;">Brighter planets = touched recently. Dimmer = stable or unused.</div>
           </div>
         </div>
 
         <!-- Quick tip row -->
-        <div
-          style="
-            display: flex;
-            gap: 16px;
-            justify-content: center;
-            flex-wrap: wrap;
-            font-size: 11px;
-            opacity: 0.5;
-            margin-bottom: 32px;
-          "
-        >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >/</kbd
-            >
-            Search</span
-          >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >Click</kbd
-            >
-            Focus file</span
-          >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >Shift+Click</kbd
-            >
-            Select &amp; trace</span
-          >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >Right-click</kbd
-            >
-            More actions</span
-          >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >G</kbd
-            >
-            Settings</span
-          >
-          <span
-            ><kbd
-              style="
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 2px 7px;
-                font-size: 10px;
-              "
-              >?</kbd
-            >
-            This guide</span
-          >
+        <div style="
+          display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
+          font-size: 11px; opacity: 0.5; margin-bottom: 32px;
+        ">
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">/</kbd> Search</span>
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">Click</kbd> Focus file</span>
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">Shift+Click</kbd> Select &amp; trace</span>
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">Right-click</kbd> More actions</span>
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">G</kbd> Settings</span>
+          <span><kbd style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 7px;font-size:10px;">?</kbd> This guide</span>
         </div>
 
-        <button
-          id="onboarding-dismiss"
-          style="
-            background: var(--accent-blue);
-            border: none;
-            border-radius: 10px;
-            color: #000;
-            font-weight: 700;
-            font-size: 13px;
-            letter-spacing: 0.5px;
-            padding: 12px 36px;
-            cursor: pointer;
-            transition: opacity 0.2s ease;
-            width: 100%;
-          "
-        >
+        <button id="onboarding-dismiss" style="
+          background: var(--accent-blue);
+          border: none; border-radius: 10px;
+          color: #000; font-weight: 700;
+          font-size: 13px; letter-spacing: 0.5px;
+          padding: 12px 36px; cursor: pointer;
+          transition: opacity 0.2s ease;
+          width: 100%;
+        ">
           Explore the Cosmos
         </button>
-        <div style="font-size: 10px; opacity: 0.3; margin-top: 12px; letter-spacing: 0.5px">
-          Press <kbd style="font-size: 9px">?</kbd> anytime to bring this back
+        <div style="font-size: 10px; opacity: 0.3; margin-top: 12px; letter-spacing: 0.5px;">
+          Press <kbd style="font-size:9px;">?</kbd> anytime to bring this back
         </div>
       </div>
     </div>
 
     <!-- Beacon chip — floats at bottom-center when active editor is off-screen -->
-    <div
-      id="beacon-chip"
-      style="
-        position: fixed;
-        bottom: 72px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(10, 14, 26, 0.85);
-        border: 1px solid rgba(100, 181, 246, 0.35);
-        border-radius: 20px;
-        padding: 6px 16px 6px 12px;
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.8);
-        display: none;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-        z-index: 300;
-        backdrop-filter: blur(10px);
-        transition:
-          opacity 0.3s ease,
-          transform 0.3s ease;
-        white-space: nowrap;
-        user-select: none;
-        max-width: 320px;
-      "
-    >
-      <span
-        style="
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: var(--accent-blue);
-          flex-shrink: 0;
-          animation: pulse 1.8s ease-in-out infinite;
-        "
-      ></span>
-      <span
-        id="beacon-filename"
-        style="
-          overflow: hidden;
-          text-overflow: ellipsis;
-          color: var(--accent-blue);
-          font-weight: 600;
-        "
-      ></span>
-      <span style="opacity: 0.4; font-size: 10px; flex-shrink: 0">— click to locate</span>
+    <div id="beacon-chip" style="
+      position: fixed;
+      bottom: 72px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10, 14, 26, 0.85);
+      border: 1px solid rgba(100, 181, 246, 0.35);
+      border-radius: 20px;
+      padding: 6px 16px 6px 12px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      z-index: 300;
+      backdrop-filter: blur(10px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      white-space: nowrap;
+      user-select: none;
+      max-width: 320px;
+    ">
+      <span style="
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--accent-blue);
+        flex-shrink: 0;
+        animation: pulse 1.8s ease-in-out infinite;
+      "></span>
+      <span id="beacon-filename" style="
+        overflow: hidden; text-overflow: ellipsis;
+        color: var(--accent-blue); font-weight: 600;
+      "></span>
+      <span style="opacity: 0.4; font-size: 10px; flex-shrink: 0;">— click to locate</span>
     </div>
 
     <script src="{{scriptUri}}"></script>

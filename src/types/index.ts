@@ -139,7 +139,7 @@ export interface GitData {
 export interface CosmosFileMetrics {
   fileId: string;
   // Git metrics — populated from GitData when available
-  heat?: number; // 0–1 churn score
+  heat?: number;           // 0–1 churn score
   commitCount?: number;
   daysSinceLastChange?: number;
   hasUncommittedChanges?: boolean;
@@ -189,8 +189,8 @@ export interface SettingsState {
   showCircularLines: boolean;
 
   // --- Tier 3: Animation toggles ---
-  enableAnimation: boolean; // planet orbital animation
-  enableStarRotation: boolean; // star axial rotation
+  enableAnimation: boolean;      // planet orbital animation
+  enableStarRotation: boolean;   // star axial rotation
 
   // --- Tier 2: Data overlay toggles ---
   showFolderLabels: boolean;
@@ -207,7 +207,7 @@ export interface SettingsState {
   performanceMode: boolean;
 
   // --- Misc ---
-  orbitalSpeed: number; // multiplier, applies when enableAnimation is true
+  orbitalSpeed: number;          // multiplier, applies when enableAnimation is true
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {

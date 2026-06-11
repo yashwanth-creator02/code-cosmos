@@ -123,6 +123,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ---------------------------------------------------------------------------
   // Helper: load data and push to panel
+  // One scan only — buildAllWorkspaces returns file count, no pre-scan needed.
   // ---------------------------------------------------------------------------
   async function loadAndSend(): Promise<void> {
     if (workspaceFolders.length === 0) {
@@ -130,26 +131,35 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const fileCount_pre = Object.keys(
-      (await buildFileTree(workspaceFolders[0], { x: 0, y: 0, z: 0 })).files
-    ).length;
-    if (fileCount_pre > VERY_LARGE_REPO_THRESHOLD) {
-      const choice = await vscode.window.showWarningMessage(
-        `Code Cosmos: Large repo (~${fileCount_pre} files). Rendering may be slow. Continue?`,
-        'Continue',
-        'Cancel'
-      );
-      if (choice !== 'Continue') return;
-    }
-
     vscode.window.showInformationMessage('Code Cosmos: Scanning...');
     const allData = await buildAllWorkspaces(workspaceFolders);
     const fileCount = Object.keys(allData.files).length;
     const folderCount = Object.keys(allData.folders).length;
 
+    if (fileCount === 0) {
+      vscode.window.showWarningMessage(
+        'Code Cosmos: No files found. Check your .cosmosignore or open a different folder.'
+      );
+      return;
+    }
+
+    // Large repo warning shown after scan — avoids a redundant pre-scan
+    if (fileCount > VERY_LARGE_REPO_THRESHOLD) {
+      const choice = await vscode.window.showWarningMessage(
+        `Code Cosmos: Large repo (${fileCount} files). Rendering may be slow. Continue?`,
+        'Continue',
+        'Cancel'
+      );
+      if (choice !== 'Continue') {
+        return;
+      }
+    }
+
     cosmosPanel.sendSettings(cosmosPanel.getSavedSettings());
     cosmosPanel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
-    vscode.window.showInformationMessage(`Code Cosmos: ${fileCount} files, ${folderCount} folders`);
+    vscode.window.showInformationMessage(
+      `Code Cosmos: ${fileCount} files across ${folderCount} folders`
+    );
   }
 
   // ---------------------------------------------------------------------------

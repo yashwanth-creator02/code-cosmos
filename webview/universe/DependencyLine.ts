@@ -42,7 +42,7 @@ export class DependencyLine {
     dependency: CosmosDependency,
     startPosition: THREE.Vector3,
     endPosition: THREE.Vector3,
-    controlHint?: THREE.Vector3 // nearest shared star position, or undefined for midpoint heuristic
+    controlHint?: THREE.Vector3  // nearest shared star position, or undefined for midpoint heuristic
   ) {
     this.dependency = dependency;
     this.startPos = startPosition.clone();
@@ -127,7 +127,7 @@ export class DependencyLine {
       const y = u * u * this.startPos.y + 2 * u * t * this.controlPos.y + t * t * this.endPos.y;
       const z = u * u * this.startPos.z + 2 * u * t * this.controlPos.z + t * t * this.endPos.z;
 
-      positions[i * 3] = x;
+      positions[i * 3]     = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
     }

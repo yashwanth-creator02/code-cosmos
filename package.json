@@ -2,8 +2,8 @@
   "name": "code-cosmos",
   "displayName": "Code Cosmos",
   "description": "Explore your codebase as an interactive 3D universe. Files become planets, folders become stars, and dependencies become constellation lines. Navigate, focus, and understand any project at a glance.",
-  "version": "0.1.0",
-  "publisher": "040d8add-70f3-6b3a-a1df-cc025b275cf9",
+  "version": "0.2.0",
+  "publisher": "Yashwanth",
   "license": "MIT",
   "icon": "images/logo.png",
   "galleryBanner": {
@@ -86,7 +86,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile && npm run build:webview",
-    "start": "npm run compile && npm run build:webview && npm run format",
+    "start": "npm run compile && npm run build:webview",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
@@ -117,5 +117,10 @@
     "minimatch": "^10.2.5",
     "p-limit": "^3.1.0",
     "three": "^0.184.0"
-  }
+  },
+  "activationEvents": [
+    "onView:codeCosmos.sidebarView",
+    "onCommand:code-cosmos.openCosmos",
+    "onCommand:code-cosmos.refreshCosmos"
+  ]
 }

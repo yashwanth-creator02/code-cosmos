@@ -121,10 +121,7 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
           this.isReady = true;
           logger.log('Webview ready');
           if (this.pendingSettings) {
-            webviewView.webview.postMessage({
-              type: 'APPLY_SETTINGS',
-              payload: this.pendingSettings,
-            });
+            webviewView.webview.postMessage({ type: 'APPLY_SETTINGS', payload: this.pendingSettings });
             this.pendingSettings = null;
           }
           if (this.pendingMessage) {
@@ -136,11 +133,7 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
           break;
 
         case 'OPEN_FILE':
-          await this.openFile(
-            message.payload.fileId,
-            message.payload.line,
-            message.payload.character
-          );
+          await this.openFile(message.payload.fileId, message.payload.line, message.payload.character);
           break;
 
         case 'SAVE_SETTINGS':
