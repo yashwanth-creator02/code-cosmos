@@ -155,8 +155,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    cosmosPanel.sendSettings(cosmosPanel.getSavedSettings());
     cosmosPanel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
+
+    // Load settings from per-project .cosmos file (falls back to globalState then defaults)
+    const settings = await cosmosPanel.loadSettingsFromCosmosFile(workspaceFolders[0]);
+    cosmosPanel.sendSettings(settings);
     vscode.window.showInformationMessage(
       `Code Cosmos: ${fileCount} files across ${folderCount} folders`
     );

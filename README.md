@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="images/icon.png" width="128" height="128" alt="Code Cosmos Logo"/>
+<img src="images/logo.png" width="128" height="128" alt="Code Cosmos Logo"/>
 
 # Code Cosmos
 
@@ -12,15 +12,7 @@ Files become planets. Folders become stars. Dependencies become constellation li
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/Yashwanth.code-cosmos?color=blue)](https://marketplace.visualstudio.com/items?itemName=Yashwanth.code-cosmos)
 [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-<!-- HERO GIF PLACEHOLDER
-     Record: Open Code Cosmos on a medium-sized project (50-150 files).
-     Start zoomed in on one solar system, slowly pull the camera back
-     to reveal the full galaxy — multiple folder-stars with their
-     planet-files orbiting them, dependency lines connecting clusters.
-     Then zoom back into one star and orbit around it.
-     Duration: 20-25 seconds. Save as images/hero.gif -->
-
-![Code Cosmos in action](images/hero.gif)
+> 📸 **Screenshot coming soon** — install the extension and open any project to see it in action.
 
 </div>
 
@@ -40,15 +32,6 @@ It is not a replacement for your editor. It is a way to **understand** before yo
 
 Every folder in your project becomes a star. Every file becomes a planet orbiting that star. The size of a star scales with how many files it contains. Planet colours reflect their file type. The whole scene is live — orbit it, fly through it, zoom in and out freely.
 
-<!-- SCREENSHOT PLACEHOLDER
-     Record: A static screenshot showing a well-structured project —
-     several distinct star clusters with their planets clearly visible,
-     dependency lines connecting them. Ideally taken from a medium
-     zoom distance so both the full galaxy and individual planets
-     are legible. Save as images/universe-overview.png -->
-
-![Universe overview](images/universe-overview.png)
-
 ---
 
 ### Dependency Visualization
@@ -62,14 +45,6 @@ Code Cosmos parses import statements across 16 languages and draws them as lines
 | **Shared**   | Files that multiple other files depend on |
 | **Circular** | Mutual import loops — these pulse red     |
 
-<!-- GIF PLACEHOLDER
-     Record: Open the filter panel and toggle dependency layers on/off
-     one by one. Show: all off → direct only → add indirect →
-     add circular (show a red pulsing loop).
-     Duration: 15 seconds. Save as images/dependency-layers.gif -->
-
-![Dependency layers](images/dependency-layers.gif)
-
 ---
 
 ### Focus Mode
@@ -78,28 +53,11 @@ Click any planet to focus on it. Everything else dims. Only that file's direct c
 
 Press `Esc` or click empty space to exit focus mode.
 
-<!-- GIF PLACEHOLDER
-     Record: Click a planet that has several connections (e.g. a service
-     or a utility file). Show the rest of the universe dimming, leaving
-     only the focused planet and its connected planets glowing.
-     Then click a different planet to switch focus.
-     Duration: 12 seconds. Save as images/focus-mode.gif -->
-
-![Focus mode](images/focus-mode.gif)
-
 ---
 
 ### Git Heatmap
 
 Enable the git heatmap to colour-code your universe by activity. Files that change frequently shift toward orange and red. Files untouched for months sit cool and blue. Uncommitted changes appear as glowing animated rings around their planet.
-
-<!-- SCREENSHOT PLACEHOLDER
-     Record: A screenshot of a git-enabled project with heatmap turned on.
-     The goal is to show clear colour variation across planets —
-     some hot (red/orange), some cold (blue/white).
-     Save as images/git-heatmap.png -->
-
-![Git heatmap](images/git-heatmap.png)
 
 ---
 
@@ -115,42 +73,17 @@ Press `F` to toggle **Pilot Mode**. The mouse unlocks from orbit control and you
 | `Shift`   | Sprint (5× speed)      |
 | `F`       | Exit pilot mode        |
 
-<!-- GIF PLACEHOLDER
-     Record: Toggle pilot mode on, then fly through the universe —
-     approach one star cluster from a distance, fly between its planets,
-     then bank toward another cluster. Show the speed difference
-     with and without Shift held.
-     Duration: 15-20 seconds. Save as images/spacecraft.gif -->
-
-![Spacecraft navigation](images/spacecraft.gif)
-
 ---
 
 ### Minimap
 
 Press `M` to open the overhead minimap. It shows the full galaxy from above with a crosshair tracking your camera position. Click anywhere on the minimap to instantly jump to that location.
 
-<!-- GIF PLACEHOLDER
-     Record: Open the minimap (M key). The full galaxy appears in the
-     corner. Click different regions of the minimap and show the
-     main camera jumping to those positions.
-     Duration: 10 seconds. Save as images/minimap.gif -->
-
-![Minimap](images/minimap.gif)
-
 ---
 
 ### Search
 
 Press `Ctrl+F` or `/` to open the search bar. Type a filename and the camera flies smoothly to that planet. Matching planets are highlighted as you type.
-
-<!-- GIF PLACEHOLDER
-     Record: Press / to open search. Type a filename fragment —
-     show matching planets being highlighted — then press Enter
-     and show the camera smoothly flying to the result.
-     Duration: 8 seconds. Save as images/search.gif -->
-
-![Search and fly-to](images/search.gif)
 
 ---
 

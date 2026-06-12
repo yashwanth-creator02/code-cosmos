@@ -1,11 +1,41 @@
+# Development source — never ship TypeScript source or maps
+src/**
+**/*.ts
+**/*.map
+**/tsconfig.json
+
+# Dev tooling
 .vscode/**
 .vscode-test/**
-src/**
-.gitignore
-.yarnrc
+.vscode-test.*
 vsc-extension-quickstart.md
-**/tsconfig.json
 **/eslint.config.mjs
-**/*.map
-**/*.ts
-**/.vscode-test.*
+.eslintrc*
+.prettierrc*
+.editorconfig
+.gitignore
+.gitattributes
+.yarnrc
+.npmrc
+
+# node_modules — CRITICAL: must be excluded or package exceeds 50MB Marketplace limit
+node_modules/**
+
+# Build inputs that aren't the final output
+webview/**/*.ts
+vite.config.*
+vitest.config.*
+
+# Test files
+**/*.test.*
+**/*.spec.*
+test/**
+tests/**
+.vscode-test/**
+
+# CI and other config
+.github/**
+*.sh
+
+# Docs that don't need to ship (README and CHANGELOG do ship — don't exclude them)
+CONTRIBUTING.md
