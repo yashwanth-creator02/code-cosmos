@@ -434,6 +434,44 @@
           margin-bottom: 8px;
         "
       >
+        LAYOUT
+      </div>
+      <div style="background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px">
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            opacity: 0.7;
+            font-size: 11px;
+            margin-bottom: 4px;
+          "
+        >
+          <span>Spacing</span>
+          <span id="spacing-val">1.0x</span>
+        </div>
+        <input
+          type="range"
+          id="s-spacing"
+          min="0.5"
+          max="2.5"
+          step="0.1"
+          value="1"
+          style="width: 100%; cursor: pointer"
+        />
+        <div style="font-size: 10px; opacity: 0.4; margin-top: 4px; line-height: 1.4">
+          Spreads planets and folders further apart — increase if things feel clumped together.
+        </div>
+      </div>
+
+      <div
+        style="
+          margin-top: 20px;
+          opacity: 0.5;
+          font-size: 10px;
+          letter-spacing: 1px;
+          margin-bottom: 8px;
+        "
+      >
         MOTION
       </div>
       <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
@@ -588,9 +626,10 @@
         <kbd>P</kbd><span>Capture high-res screenshot</span> <kbd>?</kbd
         ><span>Open this command list</span> <kbd>W A S D</kbd><span>Fly (Pilot mode only)</span>
         <kbd>Q / E</kbd><span>Ascend / Descend (Pilot mode only)</span> <kbd>Shift</kbd
-        ><span>Afterburners — speed boost</span> <kbd>Click</kbd
-        ><span>Inspect planet / folder</span> <kbd>Shift+Click</kbd
-        ><span>Multi-select planets</span> <kbd>Esc</kbd
+        ><span>Afterburners — speed boost</span> <kbd>Click</kbd><span>Fly to planet / folder</span>
+        <kbd>Ctrl+Click</kbd><span>Show dependencies + open option</span> <kbd>Shift+Click</kbd
+        ><span>Multi-select planets</span> <kbd>Right-click</kbd
+        ><span>Open file, copy path, more actions</span> <kbd>Esc</kbd
         ><span>Exit focus / clear selection / close panels</span>
       </div>
       <div
@@ -831,7 +870,20 @@
               "
               >Click</kbd
             >
-            Focus file</span
+            Fly to planet</span
+          >
+          <span
+            ><kbd
+              style="
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 2px 7px;
+                font-size: 10px;
+              "
+              >Ctrl+Click</kbd
+            >
+            Show dependencies</span
           >
           <span
             ><kbd

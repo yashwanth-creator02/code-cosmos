@@ -375,6 +375,11 @@ export class Universe {
     const minFileSize = Math.min(...fileSizes, 0);
     const maxFileSize = Math.max(...fileSizes, 1);
 
+    // spacingFactor scales every star/planet distance from origin uniformly.
+    // See buildFromNode for why a single multiplier achieves the "repel force"
+    // effect without recomputing the hierarchy.
+    const spacing = this.settings.spacingFactor || 1;
+
     const fileCount = Object.keys(data.files).length;
     const segments = this.settings.performanceMode ? 6 : 16;
     const geometry = new THREE.SphereGeometry(2, segments, segments);
@@ -405,6 +410,7 @@ export class Universe {
     }
 
     if (rootFolder) {
+      const rootRadius = 80 * spacing;
       rootFolder.fileIds.forEach((fileId, planetIndex) => {
         const file = data.files[fileId];
         if (!file) {
@@ -414,7 +420,7 @@ export class Universe {
           new THREE.Vector3(0, 0, 0),
           planetIndex,
           rootFolder.fileIds.length,
-          80
+          rootRadius
         );
         const color = FILE_TYPE_COLORS[file.type] || 0x455a64;
         const baseScale = computePlanetScale(file.size, minFileSize, maxFileSize);
@@ -435,7 +441,7 @@ export class Universe {
           angle,
           inclination,
           speed: 0.0003 + Math.random() * 0.0001,
-          radius: 80,
+          radius: rootRadius,
         });
         if (file.size > PLANET_COMPRESS_BYTES) {
           this.addCompressionRing(fileId, position, baseScale);
@@ -486,7 +492,17 @@ export class Universe {
     if (!folder || (folder.fileIds.length === 0 && folder.childFolderIds.length === 0)) {
       return instanceIndex;
     }
-    const starPosition = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+    // spacingFactor scales the distance from origin uniformly. Since each
+    // node's position is recursively built from accumulated parent offsets,
+    // scaling the final position vector by a constant S is mathematically
+    // equivalent to scaling every radius in the hierarchy by S — giving a
+    // uniform "spread out" effect without recomputing the tree.
+    const spacing = this.settings.spacingFactor || 1;
+    const starPosition = new THREE.Vector3(
+      node.position.x * spacing,
+      node.position.y * spacing,
+      node.position.z * spacing
+    );
     const star = new Star(
       folder,
       starPosition,
@@ -507,7 +523,7 @@ export class Universe {
     const label = this.createStarLabel(folder.name, labelPosition, labelScale);
     this.starLabels.push(label);
     this.scene.add(label);
-    const orbitalRadius = Math.max(20, 70 - node.depth * 10);
+    const orbitalRadius = Math.max(20, 70 - node.depth * 10) * spacing;
     let nextIndex = instanceIndex;
     folder.fileIds.forEach((fileId, planetIndex) => {
       const file = data.files[fileId];
@@ -675,19 +691,32 @@ export class Universe {
             this.togglePlanetSelection(fileId);
             return;
           }
-          // Regular click — if any selection is active, clear it first
-          if (this.selectedPlanetIds.size > 0) {
-            this.clearSelection();
+
+          // Ctrl/Cmd-click → focus mode (show dependencies) + open-file popup.
+          // This is the "inspect" action — for when you specifically want to
+          // see what a file connects to and decide whether to open it.
+          if (event.ctrlKey || event.metaKey) {
+            if (this.selectedPlanetIds.size > 0) {
+              this.clearSelection();
+            }
+            if (this.focusedStarId) {
+              this.exitStarFocusMode();
+            }
+            if (this.focusedFileId === fileId) {
+              this.exitFocusMode();
+              document.getElementById('planet-action-popup')?.remove();
+            } else {
+              this.enterFocusMode(fileId);
+              this.showPlanetActionPopup(fileId, event.clientX, event.clientY);
+            }
+            return;
           }
-          if (this.focusedStarId) {
-            this.exitStarFocusMode();
-          }
-          if (this.focusedFileId === fileId) {
-            this.exitFocusMode();
-          } else {
-            this.enterFocusMode(fileId);
-            sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
-          }
+
+          // Plain click → navigate only. Flies the camera to the planet
+          // without opening the file or entering focus mode. This is the
+          // "just looking around" interaction — no side effects.
+          document.getElementById('planet-action-popup')?.remove();
+          this.flyToPlanet(fileId);
           return;
         }
       }
@@ -1113,6 +1142,110 @@ export class Universe {
     });
     this.applySettingsToScene();
     this.applyGitVisuals();
+
+    document.getElementById('planet-action-popup')?.remove();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature: Planet action popup
+  //
+  // Shown on Ctrl/Cmd-click instead of immediately opening the file.
+  // Gives the developer a deliberate choice: open the file, or just keep
+  // exploring the dependency web that focus mode just revealed.
+  //
+  // Positioned near the click point, dismissed by: Open File click, Dismiss
+  // click, Escape (handled in the unified Escape handler), or exiting focus
+  // mode (Ctrl-clicking the same planet again).
+  // ---------------------------------------------------------------------------
+
+  private showPlanetActionPopup(fileId: string, clientX: number, clientY: number): void {
+    document.getElementById('planet-action-popup')?.remove();
+
+    const file = this.data?.files[fileId];
+    if (!file) {
+      return;
+    }
+
+    const depsOut = this.dependencies.filter(
+      (d) => d.sourceId === fileId && d.layer === DependencyLayer.DIRECT
+    ).length;
+    const depsIn = this.dependencies.filter(
+      (d) => d.targetId === fileId && d.layer === DependencyLayer.DIRECT
+    ).length;
+
+    const popup = document.createElement('div');
+    popup.id = 'planet-action-popup';
+    popup.style.cssText = `
+      position: fixed;
+      left: ${clientX}px;
+      top: ${clientY}px;
+      transform: translate(-50%, 12px);
+      background: rgba(12, 14, 22, 0.97);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 12px;
+      padding: 12px 14px;
+      min-width: 200px;
+      z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      backdrop-filter: blur(16px);
+      font-size: 12px;
+      color: rgba(255,255,255,0.9);
+    `;
+
+    popup.innerHTML = `
+      <div style="font-weight:700; font-size:13px; margin-bottom:2px; color:var(--accent-blue);">
+        ${this.escapeHtml(file.name)}
+      </div>
+      <div style="opacity:0.45; font-size:10px; margin-bottom:8px; word-break:break-all;">
+        ${this.escapeHtml(file.relativePath)}
+      </div>
+      <div style="font-size:10px; opacity:0.6; margin-bottom:10px;">
+        ↑ ${depsOut} imports &nbsp;·&nbsp; ↓ ${depsIn} imported by — highlighted above
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button id="popup-open-file" style="
+          flex:1; background: var(--accent-blue); border:none;
+          border-radius:8px; padding:7px; cursor:pointer;
+          font-size:11px; font-weight:700; color:#000;
+        ">Open File</button>
+        <button id="popup-dismiss" style="
+          flex:1; background: rgba(255,255,255,0.08);
+          border:1px solid rgba(255,255,255,0.15);
+          border-radius:8px; padding:7px; cursor:pointer;
+          font-size:11px; color:rgba(255,255,255,0.7);
+        ">Keep Exploring</button>
+      </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    // Keep popup on-screen if it would clip the right or bottom edge
+    const rect = popup.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      popup.style.left = `${window.innerWidth - rect.width - 8}px`;
+      popup.style.transform = 'translate(0, 12px)';
+    }
+    if (rect.bottom > window.innerHeight) {
+      popup.style.top = `${clientY - rect.height - 12}px`;
+    }
+
+    document.getElementById('popup-open-file')?.addEventListener('click', () => {
+      sendToExtension({ type: 'OPEN_FILE', payload: { fileId } });
+      popup.remove();
+    });
+
+    document.getElementById('popup-dismiss')?.addEventListener('click', () => {
+      popup.remove();
+    });
+
+    // Dismiss on any click outside the popup (but not the click that opened it)
+    const dismiss = (e: MouseEvent) => {
+      if (!popup.contains(e.target as Node)) {
+        popup.remove();
+        document.removeEventListener('click', dismiss);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
   private initSearch(): void {
@@ -1169,6 +1302,13 @@ export class Universe {
         const contextMenu = document.getElementById('cosmos-context-menu');
         if (contextMenu) {
           contextMenu.remove();
+          return;
+        }
+
+        // 3b. Planet action popup (Ctrl-click popup)
+        const actionPopup = document.getElementById('planet-action-popup');
+        if (actionPopup) {
+          actionPopup.remove();
           return;
         }
 
@@ -1264,15 +1404,15 @@ export class Universe {
   }
 
   public focusOnFile(fileId: string): void {
-    // Update beacon tracking — regardless of whether we fly to it,
-    // we now know which file the developer is working on.
+    // Track which file is active in the editor — the beacon chip will
+    // appear if this planet is off-screen, letting the developer choose
+    // to fly there. We deliberately do NOT auto-fly the camera here:
+    // constantly opening files (clicking through imports, tabbing between
+    // files) used to yank the camera around the cosmos on every switch,
+    // which was disorienting when the developer just wanted to navigate
+    // their own way. The beacon chip is the non-intrusive alternative.
     this.beaconFileId = fileId;
-    this.setBeaconVisible(false); // reset — updateBeaconChip will re-evaluate next frame
-
-    if (this.focusedFileId === fileId) {
-      return;
-    }
-    this.flyToPlanet(fileId);
+    this.setBeaconVisible(false); // reset — updateBeaconChip re-evaluates next frame
   }
 
   public flyToPlanet(fileId: string): void {
@@ -2825,9 +2965,9 @@ export class Universe {
         this.saveSettings();
       });
     };
-    const bindSlider = (id: string, key: keyof SettingsState) => {
+    const bindSlider = (id: string, key: keyof SettingsState, valElId: string, rebuild = false) => {
       const el = document.getElementById(id) as HTMLInputElement;
-      const valEl = document.getElementById('speed-val');
+      const valEl = document.getElementById(valElId);
       if (!el) {
         return;
       }
@@ -2841,7 +2981,14 @@ export class Universe {
         if (valEl) {
           valEl.textContent = `${val.toFixed(1)}x`;
         }
+      });
+      // 'change' fires once when the user releases the slider — rebuilding on
+      // every 'input' tick would be expensive for a full scene rebuild.
+      el.addEventListener('change', () => {
         this.saveSettings();
+        if (rebuild && this.data) {
+          this.build(this.data);
+        }
       });
     };
     bindCheckbox('s-direct', 'showDirectLines');
@@ -2858,7 +3005,8 @@ export class Universe {
     bindCheckbox('s-performance', 'performanceMode');
     bindCheckbox('s-minimap', 'showMinimap');
     bindCheckbox('s-heatmap', 'showGitHeatmap');
-    bindSlider('s-speed', 'orbitalSpeed');
+    bindSlider('s-speed', 'orbitalSpeed', 'speed-val');
+    bindSlider('s-spacing', 'spacingFactor', 'spacing-val', true); // rebuild=true — repositions everything
     document.querySelectorAll('.preset-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.applyPreset((btn as HTMLElement).dataset.preset as keyof typeof PRESETS);
@@ -2868,7 +3016,10 @@ export class Universe {
   }
 
   private applyPreset(preset: keyof typeof PRESETS): void {
-    this.settings = { ...PRESETS[preset] };
+    // Preserve spacingFactor — it's a personal layout preference independent
+    // of the visual/performance preset being applied.
+    const spacingFactor = this.settings.spacingFactor;
+    this.settings = { ...PRESETS[preset], spacingFactor };
     this.applySettingsToScene();
     this.saveSettings();
   }
@@ -2896,6 +3047,14 @@ export class Universe {
     const speedEl = document.getElementById('s-speed') as HTMLInputElement;
     if (speedEl) {
       speedEl.value = String(this.settings.orbitalSpeed);
+      const speedVal = document.getElementById('speed-val');
+      if (speedVal) speedVal.textContent = `${this.settings.orbitalSpeed.toFixed(1)}x`;
+    }
+    const spacingEl = document.getElementById('s-spacing') as HTMLInputElement;
+    if (spacingEl) {
+      spacingEl.value = String(this.settings.spacingFactor);
+      const spacingVal = document.getElementById('spacing-val');
+      if (spacingVal) spacingVal.textContent = `${this.settings.spacingFactor.toFixed(1)}x`;
     }
   }
 

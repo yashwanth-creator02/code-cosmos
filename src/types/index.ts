@@ -208,6 +208,9 @@ export interface SettingsState {
 
   // --- Misc ---
   orbitalSpeed: number; // multiplier, applies when enableAnimation is true
+  spacingFactor: number; // multiplies all star/planet distances from origin —
+  // higher = more spread out, less clumped
+  // (analogous to Obsidian's "repel force" slider)
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -221,6 +224,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   enableAnimation: false,
   enableStarRotation: true,
   orbitalSpeed: 1.0,
+  spacingFactor: 1.0,
 
   // Data overlays
   showFolderLabels: true,
