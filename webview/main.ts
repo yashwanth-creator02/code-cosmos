@@ -78,7 +78,7 @@ onMessageFromExtension((message: any) => {
       const loadingText = document.getElementById('loading-text');
       if (loadingText) {
         loadingText.textContent = 'Building universe...';
-        loadingText.style.color = '';   // reset any previous error colour
+        loadingText.style.color = ''; // reset any previous error colour
         loadingText.style.fontSize = '';
       }
 

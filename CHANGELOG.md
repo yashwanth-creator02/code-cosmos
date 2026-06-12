@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.0] — 2026-06-11
+
+### Added
+
+**Visual encoding**
+
+- Planet size now encodes file weight — larger files render as larger planets using logarithmic scale (0.5× to 3.0×)
+- Cyan compression ring on files above 100 KB indicating the planet is rendered smaller than its true size
+- Subtle thermal tint always active — recently touched files glow brighter, ancient files dim slightly, even without git data
+- Size-based brightness fallback when git is unavailable
+
+**Dependency lines**
+
+- Quadratic Bézier curves replace straight lines — lines now route through shared parent stars reducing visual hairball
+- Bézier control points update live during orbital animation
+
+**Navigation**
+
+- Camera bookmarks — save up to 5 named views, recall with Ctrl+1–5 or click, cinematic cubic-ease flight
+- Inline bookmark name dialog (VS Code WebView blocks window.prompt — replaced with native DOM input)
+- Beacon chip — passive floating indicator when the active editor file is off-screen, click to fly to it
+- Path trace — shift-click two planets to find the shortest BFS dependency path between them
+- Closest Common Ancestor shown in gold when no direct path exists
+
+**Multi-select**
+
+- Shift-click to accumulate planet selection with gold highlight rings
+- Selection panel shows selected files and path trace breadcrumb
+- Selection persistent until Escape or Clear button
+
+**UI & UX**
+
+- Onboarding overlay on first launch — 4 concept cards, key shortcuts, recallable with ?
+- Repo name and branch always visible in top-left header
+- Right-click context menu on planets — Open File, Copy Path, Show Dependencies, Fly To, Add to Selection
+- Stale indicator pill appears when files change without requiring a full rebuild
+- Unified Escape key handler — closes panels in priority order
+
+**Extension architecture**
+
+- Moved from editor tab (ViewColumn.Beside) to Activity Bar sidebar (WebviewViewProvider)
+- SVG icon for Activity Bar — renders cleanly at small sizes with VS Code theme colours
+- ResizeObserver replaces window resize listener — fixes blank canvas on panel resize
+- Smart rebuild: 5s debounce, skips rebuild when panel hidden, rebuilds on panel reveal
+
+### Fixed
+
+- Git data now merged from all workspace roots (was silently missing for non-primary roots)
+- Settings key S remapped to G — no longer conflicts with spacecraft backward movement
+- window.prompt replaced with inline DOM dialog throughout (blocked by VS Code WebView sandbox)
+- Spacecraft mode only registers movement keys when active — prevents phantom movement
+
+### Changed
+
+- Keyboard shortcut for settings: **S → G** (Gear)
+- Spacecraft mode toggle: **F** (unchanged, but now correctly isolated from other key bindings)
+
+---
+
 ## [0.1.0] — 2026-06-07
 
 ### Added

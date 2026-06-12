@@ -21,6 +21,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { CosmosData, SettingsState, DEFAULT_SETTINGS } from '../types';
 import { logger } from '../utils/logger';
+import { readCosmosFile, savePreferences } from '../core/cosmosFile';
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -121,7 +122,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
           this.isReady = true;
           logger.log('Webview ready');
           if (this.pendingSettings) {
-            webviewView.webview.postMessage({ type: 'APPLY_SETTINGS', payload: this.pendingSettings });
+            webviewView.webview.postMessage({
+              type: 'APPLY_SETTINGS',
+              payload: this.pendingSettings,
+            });
             this.pendingSettings = null;
           }
           if (this.pendingMessage) {
@@ -133,12 +137,27 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
           break;
 
         case 'OPEN_FILE':
-          await this.openFile(message.payload.fileId, message.payload.line, message.payload.character);
+          await this.openFile(
+            message.payload.fileId,
+            message.payload.line,
+            message.payload.character
+          );
           break;
 
         case 'SAVE_SETTINGS':
-          await this.context.globalState.update('cosmosSettings', message.payload);
-          logger.log('Settings saved');
+          try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders && workspaceFolders.length > 0) {
+              // Write to per-project .cosmos file (primary)
+              await savePreferences(workspaceFolders[0], message.payload);
+            }
+            // Also keep globalState as fallback for single-root workspaces
+            // and for users who don't have a workspace open
+            await this.context.globalState.update('cosmosSettings', message.payload);
+            logger.log('Settings saved to .cosmos and globalState');
+          } catch (err) {
+            logger.error(`Settings save failed: ${err}`);
+          }
           break;
 
         case 'REFRESH':
@@ -175,7 +194,27 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   }
 
   public getSavedSettings(): SettingsState {
+    // Synchronous fallback — the async read happens in loadSettingsFromCosmosFile()
+    // which is called before sendSettings() in loadAndSend().
+    // This method is kept for compatibility but returns defaults if not yet loaded.
     return this.context.globalState.get<SettingsState>('cosmosSettings', DEFAULT_SETTINGS);
+  }
+
+  /**
+   * Async version — reads from the per-project .cosmos file.
+   * Falls back to globalState (legacy), then defaults.
+   * Called from loadAndSend() before sending LOAD_UNIVERSE.
+   */
+  public async loadSettingsFromCosmosFile(
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<SettingsState> {
+    try {
+      const cosmosData = await readCosmosFile(workspaceFolder);
+      return cosmosData.preferences;
+    } catch {
+      // Fall back to globalState for users migrating from 0.1.x
+      return this.context.globalState.get<SettingsState>('cosmosSettings', DEFAULT_SETTINGS);
+    }
   }
 
   public sendSettings(settings: SettingsState): void {
