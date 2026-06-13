@@ -5,6 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.3.0] — 2026-06-12
+
+### Added
+
+**`.cosmos.cache` — expensive-data cache**
+
+- New per-workspace `.cosmos.cache` file caches the full dependency graph, git churn scores, and spatial layout
+- On load, a lightweight fingerprint (file manifest of size+mtime, plus current git HEAD via the VS Code git API) is computed and compared against the cache
+- If the fingerprint matches, AST parsing and git log (the two genuinely expensive operations — git log alone can issue up to 500 diffBetween calls) are skipped entirely and cached data is returned directly
+- If the fingerprint differs, a full rebuild runs and writes a fresh cache
+- Manual refresh (`code-cosmos.refreshCosmos`) always bypasses the cache — explicit user intent means fresh data regardless of fingerprint
+- `.cosmos.cache` is automatically added to `.gitignore` alongside `.cosmos`
+
+### Fixed
+
+**Camera bookmarks now persist correctly**
+
+- Previously stored only in `localStorage` and never reached `.cosmos` — bookmarks didn't survive across machines or appear in the `.cosmos` file
+- New `SAVE_NAVIGATION` / `APPLY_NAVIGATION` message pair round-trips bookmarks through the per-project `.cosmos` file (`navigation.namedSlots`)
+- Bookmarks load from `.cosmos` on cosmos open and save immediately when added or removed
+
+**`.cosmos` and `.cosmos.cache` excluded from the cosmos itself**
+
+- These files were not in the exclusion list — they would appear as "planets" in the visualization, and writing `.cosmos.cache` would change its own size/mtime, causing the fingerprint check to always report "changed" (a self-invalidating cache loop)
+- Added to `SMART_DEFAULTS` in the exclusion manager
+
+---
+
 ## [0.2.0] — 2026-06-11
 
 ### Added

@@ -18,6 +18,9 @@ import {
   GitData,
   CosmosFile,
   FileType,
+  NavigationData,
+  CameraState,
+  NamedCameraSlot,
 } from '../../src/types';
 
 const PRESETS = {
@@ -173,14 +176,14 @@ export class Universe {
   // Path trace — active when exactly 2 planets are selected
   private pathTraceLines: THREE.Line[] = [];
 
-  // Camera bookmarks — up to MAX_BOOKMARKS named slots persisted to localStorage
+  // Camera bookmarks — up to MAX_BOOKMARKS named slots, persisted to the
+  // per-project .cosmos file via SAVE_NAVIGATION (see saveBookmark/deleteBookmark).
+  // Previously these lived only in localStorage and never reached .cosmos —
+  // that was the bug: bookmarks didn't survive across machines/clones and
+  // weren't visible in the .cosmos file the user inspects.
   private static readonly MAX_BOOKMARKS = 5;
-  private static readonly BOOKMARKS_KEY = 'cosmos_camera_bookmarks_v1';
-  private cameraBookmarks: Array<{
-    name: string;
-    position: { x: number; y: number; z: number };
-    target: { x: number; y: number; z: number };
-  }> = [];
+  private cameraBookmarks: NamedCameraSlot[] = [];
+  private navigationLoaded = false; // true once APPLY_NAVIGATION has been processed
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -2485,26 +2488,18 @@ export class Universe {
   // ---------------------------------------------------------------------------
   // Feature: Camera Bookmarks
   //
-  // Up to 5 named camera positions persisted to localStorage.
-  // Rendered as pill buttons in the top-left corner of the WebView.
-  // Saving: records current camera.position + controls.target.
-  // Loading: cinematic flight to saved position using existing flyTo animation.
-  //
-  // localStorage is appropriate here — bookmarks are personal developer
-  // preferences, not project data, so globalState or .cosmos file aren't needed.
+  // Up to 5 named camera positions, persisted to the per-project .cosmos file
+  // (navigation.namedSlots). Rendered as pill buttons in the top-right corner.
+  // Saving: records current camera.position + controls.target, sends
+  // SAVE_NAVIGATION to the extension. Loading: bookmarks arrive via
+  // APPLY_NAVIGATION (see applyNavigation below) — NOT read here, since the
+  // extension hasn't sent them yet at construction time.
   // ---------------------------------------------------------------------------
 
   private initCameraBookmarks(): void {
-    // Load persisted bookmarks
-    try {
-      const saved = localStorage.getItem(Universe.BOOKMARKS_KEY);
-      if (saved) {
-        this.cameraBookmarks = JSON.parse(saved);
-      }
-    } catch {
-      /* ignore */
-    }
-
+    // Render an empty bar immediately — applyNavigation() will populate it
+    // once .cosmos data arrives from the extension (typically within one
+    // message round-trip of READY).
     this.renderBookmarkBar();
 
     // Keyboard shortcut: Ctrl+1..5 flies to bookmark 1..5
@@ -2516,6 +2511,33 @@ export class Universe {
           this.flyToBookmark(idx);
         }
       }
+    });
+  }
+
+  /**
+   * Called from main.ts when APPLY_NAVIGATION arrives — populates camera
+   * bookmarks (and, in future, home position / camera history) from the
+   * per-project .cosmos file.
+   */
+  public applyNavigation(navigation: NavigationData): void {
+    this.cameraBookmarks = navigation.namedSlots ?? [];
+    this.navigationLoaded = true;
+    this.renderBookmarkBar();
+  }
+
+  /**
+   * Persist the current bookmark list to .cosmos via SAVE_NAVIGATION.
+   * Guarded by navigationLoaded — without this guard, an early save (e.g.
+   * before APPLY_NAVIGATION has arrived) could overwrite existing bookmarks
+   * in .cosmos with an empty array.
+   */
+  private persistBookmarks(): void {
+    if (!this.navigationLoaded) {
+      return;
+    }
+    sendToExtension({
+      type: 'SAVE_NAVIGATION',
+      payload: { namedSlots: this.cameraBookmarks },
     });
   }
 
@@ -2638,7 +2660,9 @@ export class Universe {
 
     // VS Code WebView blocks window.prompt() — build an inline dialog instead.
     const existing = document.getElementById('bookmark-name-dialog');
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+    }
 
     const dialog = document.createElement('div');
     dialog.id = 'bookmark-name-dialog';
@@ -2700,24 +2724,28 @@ export class Universe {
     const confirm = () => {
       const name = input.value.trim().slice(0, 30);
       dialog.remove();
-      if (!name) return;
-
-      this.cameraBookmarks.push({
-        name,
-        position: {
-          x: this.camera.position.x,
-          y: this.camera.position.y,
-          z: this.camera.position.z,
-        },
-        target: { x: this.controls.target.x, y: this.controls.target.y, z: this.controls.target.z },
-      });
-
-      try {
-        localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
-      } catch {
-        /* ignore */
+      if (!name) {
+        return;
       }
 
+      const slot: NamedCameraSlot = {
+        name,
+        camera: {
+          position: {
+            x: this.camera.position.x,
+            y: this.camera.position.y,
+            z: this.camera.position.z,
+          },
+          target: {
+            x: this.controls.target.x,
+            y: this.controls.target.y,
+            z: this.controls.target.z,
+          },
+        },
+      };
+
+      this.cameraBookmarks.push(slot);
+      this.persistBookmarks();
       this.renderBookmarkBar();
     };
 
@@ -2747,8 +2775,12 @@ export class Universe {
 
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
-    const endPosition = new THREE.Vector3(bm.position.x, bm.position.y, bm.position.z);
-    const endTarget = new THREE.Vector3(bm.target.x, bm.target.y, bm.target.z);
+    const endPosition = new THREE.Vector3(
+      bm.camera.position.x,
+      bm.camera.position.y,
+      bm.camera.position.z
+    );
+    const endTarget = new THREE.Vector3(bm.camera.target.x, bm.camera.target.y, bm.camera.target.z);
 
     // Scale duration to distance — short hop = quick, cross-galaxy = dramatic
     const dist = startPosition.distanceTo(endPosition);
@@ -2775,11 +2807,7 @@ export class Universe {
 
   private deleteBookmark(idx: number): void {
     this.cameraBookmarks.splice(idx, 1);
-    try {
-      localStorage.setItem(Universe.BOOKMARKS_KEY, JSON.stringify(this.cameraBookmarks));
-    } catch {
-      /* ignore */
-    }
+    this.persistBookmarks();
     this.renderBookmarkBar();
   }
 
@@ -3048,13 +3076,17 @@ export class Universe {
     if (speedEl) {
       speedEl.value = String(this.settings.orbitalSpeed);
       const speedVal = document.getElementById('speed-val');
-      if (speedVal) speedVal.textContent = `${this.settings.orbitalSpeed.toFixed(1)}x`;
+      if (speedVal) {
+        speedVal.textContent = `${this.settings.orbitalSpeed.toFixed(1)}x`;
+      }
     }
     const spacingEl = document.getElementById('s-spacing') as HTMLInputElement;
     if (spacingEl) {
       spacingEl.value = String(this.settings.spacingFactor);
       const spacingVal = document.getElementById('spacing-val');
-      if (spacingVal) spacingVal.textContent = `${this.settings.spacingFactor.toFixed(1)}x`;
+      if (spacingVal) {
+        spacingVal.textContent = `${this.settings.spacingFactor.toFixed(1)}x`;
+      }
     }
   }
 

@@ -2,10 +2,11 @@
 
 import { sendToExtension, onMessageFromExtension } from './bridge/messageBridge';
 import { Universe } from './universe/Universe';
-import { CosmosData, SettingsState } from '../src/types';
+import { CosmosData, SettingsState, NavigationData } from '../src/types';
 
 let universe: Universe | null = null;
 let pendingSettings: SettingsState | null = null;
+let pendingNavigation: NavigationData | null = null;
 
 // ---------------------------------------------------------------------------
 // Stale indicator
@@ -68,6 +69,14 @@ onMessageFromExtension((message: any) => {
         universe.applySettings(message.payload);
       } else {
         pendingSettings = message.payload;
+      }
+      break;
+
+    case 'APPLY_NAVIGATION':
+      if (universe) {
+        universe.applyNavigation(message.payload);
+      } else {
+        pendingNavigation = message.payload;
       }
       break;
 
@@ -156,6 +165,11 @@ window.addEventListener('DOMContentLoaded', () => {
   if (pendingSettings) {
     universe.applySettings(pendingSettings);
     pendingSettings = null;
+  }
+
+  if (pendingNavigation) {
+    universe.applyNavigation(pendingNavigation);
+    pendingNavigation = null;
   }
 
   sendToExtension({ type: 'READY' });

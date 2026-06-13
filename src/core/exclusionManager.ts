@@ -4,18 +4,27 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { minimatch } from 'minimatch';
 
+// src/core/exclusionManager.ts
+
 const SMART_DEFAULTS = [
-  '**/node_modules/**',
-  '**/.git/**',
-  '**/dist/**',
-  '**/build/**',
-  '**/out/**',
-  '**/.next/**',
-  '**/__pycache__/**',
+  '**/node_modules',
+  '**/.git',
+  '**/dist',
+  '**/build',
+  '**/out',
+  '**/.next',
+  '**/__pycache__',
   '**/.env',
   '**/package-lock.json',
   '**/yarn.lock',
   '**/pnpm-lock.yaml',
+  // Code Cosmos's own per-project files — MUST be excluded.
+  // Without this, writing .cosmos.cache changes its own size/mtime, which the
+  // next fingerprint check would detect as "files changed", invalidating the
+  // cache on every single load (a self-invalidating loop). They'd also show
+  // up as JSON "planets" in the cosmos itself, which makes no sense.
+  '**/.cosmos',
+  '**/.cosmos.cache',
 ];
 
 async function loadCosmosIgnore(workspaceRoot: string): Promise<string[]> {
@@ -33,7 +42,7 @@ async function loadCosmosIgnore(workspaceRoot: string): Promise<string[]> {
           return line.replace(/^(\.\/|\/)/, '**/');
         }
         if (!line.includes('*') && !line.includes('/')) {
-          return `**/${line}/**`;
+          return `**/${line}`;
         }
         return line;
       });

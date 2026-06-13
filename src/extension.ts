@@ -5,6 +5,14 @@ import { initLogger, logger } from './utils/logger';
 import { buildFileTree } from './core/fileTree';
 import { CosmosPanel } from './panel/CosmosPanel';
 import { CosmosData, StarNode } from './types';
+import {
+  readCosmosCache,
+  writeCosmosCache,
+  computeFingerprint,
+  fingerprintsMatch,
+  makeProjectId,
+  FingerprintResult,
+} from './core/cosmosCache';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,8 +36,72 @@ function prefixStarTree(node: StarNode, prefix: string): StarNode {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Cached file tree builder
+//
+// Computes a cheap "fingerprint" (file manifest + git HEAD, no AST/git log)
+// and compares it to the cached fingerprint from .cosmos.cache. If they match,
+// the cached CosmosData is returned directly — AST parsing and git log (the
+// two genuinely expensive operations) are skipped entirely.
+//
+// If forceRebuild is true (manual refresh), the cache is bypassed entirely —
+// the user explicitly asked for fresh data, e.g. after editing .cosmosignore,
+// which doesn't change any file's mtime.
+// ---------------------------------------------------------------------------
+
+async function buildFileTreeCached(
+  folder: vscode.WorkspaceFolder,
+  offset: { x: number; y: number; z: number },
+  forceRebuild: boolean
+): Promise<{ data: CosmosData; fromCache: boolean }> {
+  logger.log(`Building file tree for ${folder.name}...`);
+  const projectId = makeProjectId(folder.uri.fsPath);
+
+  if (!forceRebuild) {
+    const [cache, current] = await Promise.all([
+      readCosmosCache(folder, projectId),
+      computeFingerprint(folder),
+    ]);
+
+    if (cache) {
+      const cached: FingerprintResult = {
+        manifest: cache.fileManifest,
+        gitHead: cache.lastKnownGitHead,
+      };
+      if (fingerprintsMatch(cached, current)) {
+        logger.log(`.cosmos.cache hit for ${folder.name} — skipping AST parse + git log`);
+        // Reapply offset — it's a layout positioning value, not derived data,
+        // and is recomputed per-build based on workspace ordering.
+        const data: CosmosData = {
+          ...cache.data,
+          folders: {
+            ...cache.data.folders,
+            '.': { ...cache.data.folders['.'], offset },
+          },
+        };
+        return { data, fromCache: true };
+      }
+      logger.log(`.cosmos.cache stale for ${folder.name} — rebuilding`);
+    } else {
+      logger.log(`.cosmos.cache miss for ${folder.name} — building`);
+    }
+
+    const data = await buildFileTree(folder, offset);
+    await writeCosmosCache(folder, projectId, data, current);
+    return { data, fromCache: false };
+  }
+
+  // Force path — used by manual refresh. Still write a fresh cache afterwards
+  // so the next normal load benefits from it.
+  const data = await buildFileTree(folder, offset);
+  const fingerprint = await computeFingerprint(folder);
+  await writeCosmosCache(folder, projectId, data, fingerprint);
+  return { data, fromCache: false };
+}
+
 export async function buildAllWorkspaces(
-  workspaceFolders: readonly vscode.WorkspaceFolder[]
+  workspaceFolders: readonly vscode.WorkspaceFolder[],
+  forceRebuild = false
 ): Promise<CosmosData> {
   const allData: CosmosData = {
     files: {},
@@ -40,6 +112,7 @@ export async function buildAllWorkspaces(
     starTree: null,
     gitData: null,
   };
+  logger.log('Building all workspaces...');
 
   for (let i = 0; i < workspaceFolders.length; i++) {
     const folder = workspaceFolders[i];
@@ -49,7 +122,7 @@ export async function buildAllWorkspaces(
       z: 0,
     };
 
-    const data = await buildFileTree(folder, offset);
+    const { data } = await buildFileTreeCached(folder, offset, forceRebuild);
     const prefix = `${folder.name}:`;
 
     for (const [name, root] of Object.entries(data.workspaceRoots)) {
@@ -157,9 +230,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     cosmosPanel.sendMessage({ type: 'LOAD_UNIVERSE', payload: allData });
 
-    // Load settings from per-project .cosmos file (falls back to globalState then defaults)
+    // Load settings and navigation (camera bookmarks etc.) from per-project .cosmos file
     const settings = await cosmosPanel.loadSettingsFromCosmosFile(workspaceFolders[0]);
     cosmosPanel.sendSettings(settings);
+
+    const navigation = await cosmosPanel.loadNavigationFromCosmosFile(workspaceFolders[0]);
+    cosmosPanel.sendNavigation(navigation);
     vscode.window.showInformationMessage(
       `Code Cosmos: ${fileCount} files across ${folderCount} folders`
     );
@@ -189,7 +265,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('code-cosmos.refreshCosmos', async () => {
       try {
-        const freshData = await buildAllWorkspaces(workspaceFolders);
+        // forceRebuild=true — manual refresh bypasses .cosmos.cache entirely.
+        // The user explicitly asked for fresh data (e.g. after editing
+        // .cosmosignore, which wouldn't change any tracked file's mtime).
+        const freshData = await buildAllWorkspaces(workspaceFolders, true);
         cosmosPanel.sendMessage({ type: 'LOAD_UNIVERSE', payload: freshData });
       } catch (err) {
         logger.error(`refreshCosmos failed: ${err}`);
@@ -209,7 +288,7 @@ export function activate(context: vscode.ExtensionContext) {
     cosmosPanel.setRefreshCallback(async () => {
       logger.log('Manual refresh');
       vscode.window.showInformationMessage('Code Cosmos: Refreshing...');
-      const freshData = await buildAllWorkspaces(workspaceFolders);
+      const freshData = await buildAllWorkspaces(workspaceFolders, true);
       cosmosPanel.sendMessage({ type: 'LOAD_UNIVERSE', payload: freshData });
     });
 

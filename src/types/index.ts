@@ -250,6 +250,28 @@ export interface FilterState {
 }
 
 // ---------------------------------------------------------------------------
+// Navigation persistence — camera bookmarks, home position, history.
+// Shared between .cosmos file schema (extension side) and the webview's
+// camera bookmark UI. Defined here so both sides import the same shape.
+// ---------------------------------------------------------------------------
+
+export interface CameraState {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+}
+
+export interface NamedCameraSlot {
+  name: string;
+  camera: CameraState;
+}
+
+export interface NavigationData {
+  homePosition: CameraState | null;
+  namedSlots: NamedCameraSlot[];
+  cameraHistory: CameraState[];
+}
+
+// ---------------------------------------------------------------------------
 // Webview message protocol
 //
 // All messages between extension and webview are typed here.
@@ -259,6 +281,7 @@ export interface FilterState {
 export type MessageToWebview =
   | { type: 'LOAD_UNIVERSE'; payload: CosmosData }
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
+  | { type: 'APPLY_NAVIGATION'; payload: NavigationData }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
   | {
       type: 'COSMOS_STALE';
@@ -272,5 +295,12 @@ export type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string; line?: number; character?: number } }
   | { type: 'SAVE_SETTINGS'; payload: SettingsState }
+  | {
+      type: 'SAVE_NAVIGATION';
+      payload: Partial<NavigationData>;
+      // Partial — the webview sends only the field(s) that changed
+      // (e.g. just namedSlots when a bookmark is added). CosmosPanel merges
+      // this into the existing .cosmos navigation data, preserving the rest.
+    }
   | { type: 'REFRESH' }
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
