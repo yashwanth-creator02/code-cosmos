@@ -695,9 +695,7 @@ export class Universe {
             return;
           }
 
-          // Ctrl/Cmd-click → focus mode (show dependencies) + open-file popup.
-          // This is the "inspect" action — for when you specifically want to
-          // see what a file connects to and decide whether to open it.
+          // Ctrl/Cmd-click → show dependencies + open-file popup
           if (event.ctrlKey || event.metaKey) {
             if (this.selectedPlanetIds.size > 0) {
               this.clearSelection();
@@ -715,11 +713,20 @@ export class Universe {
             return;
           }
 
-          // Plain click → navigate only. Flies the camera to the planet
-          // without opening the file or entering focus mode. This is the
-          // "just looking around" interaction — no side effects.
+          // Alt-click → cinematic zoom to planet (intentional navigation).
+          // Plain click no longer zooms — too many accidental camera jumps while
+          // just trying to rotate/pan the cosmos. Use Alt to signal intent.
+          if (event.altKey) {
+            document.getElementById('planet-action-popup')?.remove();
+            this.flyToPlanet(fileId);
+            return;
+          }
+
+          // Plain click → show tooltip/highlight only. No camera movement.
+          // The tooltip already appears via onMouseMove hover — clicking is
+          // treated as a "select this for context" action, not "go here".
+          // Right-click for more options; Alt-click to fly there.
           document.getElementById('planet-action-popup')?.remove();
-          this.flyToPlanet(fileId);
           return;
         }
       }
@@ -736,10 +743,35 @@ export class Universe {
       if (this.focusedFileId) {
         this.exitFocusMode();
       }
-      if (this.focusedStarId === folderId) {
-        this.exitStarFocusMode();
+      // Alt+click star → fly to it AND enter star focus mode
+      // Plain click star → enter/exit star focus mode only (no camera jump)
+      if (event.altKey) {
+        if (this.focusedStarId === folderId) {
+          this.exitStarFocusMode();
+        } else {
+          this.enterStarFocusMode(folderId);
+        }
       } else {
-        this.enterStarFocusMode(folderId);
+        // Plain click — toggle focus mode without flying
+        if (this.focusedStarId === folderId) {
+          this.exitStarFocusMode();
+        } else {
+          this.focusedStarId = folderId;
+          const exitBtn = document.getElementById('exit-focus-btn');
+          if (exitBtn) exitBtn.style.display = 'flex';
+          // Apply dimming but don't fly
+          const folder = this.data?.folders[folderId];
+          if (folder) {
+            const folderFileIds = new Set(folder.fileIds);
+            this.planets.forEach((planet, fileId) => {
+              const isConnected = folderFileIds.has(fileId);
+              const color = new THREE.Color(planet.color);
+              if (!isConnected) color.multiplyScalar(0.08);
+              this.planetInstanceMesh!.setColorAt(planet.instanceIndex, color);
+            });
+            this.planetInstanceMesh!.instanceColor!.needsUpdate = true;
+          }
+        }
       }
       return;
     }
@@ -860,7 +892,7 @@ export class Universe {
         icon: '📋',
         label: 'Copy Path',
         action: () => {
-          navigator.clipboard?.writeText(file.relativePath).catch(() => {});
+          navigator.clipboard?.writeText(file.relativePath).catch(() => { });
         },
       },
       {

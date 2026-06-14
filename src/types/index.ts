@@ -272,6 +272,17 @@ export interface NavigationData {
 }
 
 // ---------------------------------------------------------------------------
+// Scan progress — reported during buildAllWorkspaces so the webview can show
+// a loading screen with a percentage rather than an indeterminate spinner.
+// ---------------------------------------------------------------------------
+
+export interface ScanProgressPayload {
+  percent: number; // 0-100, overall across all workspace folders
+  phase: 'scan' | 'parse' | 'git' | 'cache' | 'render';
+  message: string; // human-readable, e.g. "Parsing dependencies (120/450)"
+}
+
+// ---------------------------------------------------------------------------
 // Webview message protocol
 //
 // All messages between extension and webview are typed here.
@@ -283,6 +294,7 @@ export type MessageToWebview =
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
   | { type: 'APPLY_NAVIGATION'; payload: NavigationData }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
+  | { type: 'SCAN_PROGRESS'; payload: ScanProgressPayload }
   | {
       type: 'COSMOS_STALE';
       payload: {};

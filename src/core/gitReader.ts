@@ -2,21 +2,28 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GitData, GitFileInfo } from '../types';
 import { logger } from '../utils/logger';
+import { ProgressCallback, noopProgress } from './progress';
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-export async function readGitData(workspaceRoot: string, fileIds: string[]): Promise<GitData> {
+export async function readGitData(
+  workspaceRoot: string,
+  fileIds: string[],
+  onProgress: ProgressCallback = noopProgress
+): Promise<GitData> {
   try {
     const gitExtension = vscode.extensions.getExtension('vscode.git');
     if (!gitExtension) {
       logger.log('Git extension not found');
+      onProgress('git', 1, 1);
       return { branch: 'unknown', fileInfo: {}, available: false };
     }
 
     const git = gitExtension.exports.getAPI(1);
     if (!git) {
+      onProgress('git', 1, 1);
       return { branch: 'unknown', fileInfo: {}, available: false };
     }
 
@@ -26,6 +33,7 @@ export async function readGitData(workspaceRoot: string, fileIds: string[]): Pro
       ) || git.repositories[0];
 
     if (!repo) {
+      onProgress('git', 1, 1);
       return { branch: 'unknown', fileInfo: {}, available: false };
     }
 
@@ -46,6 +54,13 @@ export async function readGitData(workspaceRoot: string, fileIds: string[]): Pro
     const commitCounts: Record<string, number> = {};
     const lastChangeDates: Record<string, number> = {};
 
+    const totalCommits = logs.length;
+    let processedCommits = 0;
+
+    if (totalCommits === 0) {
+      onProgress('git', 1, 1);
+    }
+
     for (const commit of logs) {
       const commitDate = new Date(commit.commitDate || commit.authorDate || now).getTime();
       try {
@@ -58,6 +73,8 @@ export async function readGitData(workspaceRoot: string, fileIds: string[]): Pro
           }
         }
       } catch {}
+      processedCommits++;
+      onProgress('git', processedCommits, totalCommits);
     }
 
     const maxCommits = Math.max(1, ...(Object.values(commitCounts) as number[]));
@@ -86,6 +103,7 @@ export async function readGitData(workspaceRoot: string, fileIds: string[]): Pro
     return { branch, fileInfo, available: true };
   } catch (err) {
     logger.warn(`Git read failed: ${err}`);
+    onProgress('git', 1, 1);
     return { branch: 'unknown', fileInfo: {}, available: false };
   }
 }

@@ -16,7 +16,7 @@
       style="position: absolute; inset: 0; width: 100%; height: 100%; display: block"
     ></canvas>
 
-    <!-- Loading overlay -->
+    <!-- Loading overlay — shows scan progress with live percentage -->
     <div
       id="loading-overlay"
       style="
@@ -25,7 +25,7 @@
         left: 0;
         width: 100%;
         height: 100%;
-        background: black;
+        background: #020408;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -33,25 +33,77 @@
         z-index: 1000;
       "
     >
+      <!-- Pulsing star -->
       <div
         id="loading-sun"
         style="
-          width: 80px;
-          height: 80px;
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
           background: radial-gradient(circle, #fff5c0, #ffaa00, #ff4400);
           box-shadow:
-            0 0 40px #ffaa00,
-            0 0 80px #ff6600;
+            0 0 30px #ffaa00,
+            0 0 60px #ff6600;
           animation: pulse 1.5s ease-in-out infinite;
-          margin-bottom: 32px;
+          margin-bottom: 28px;
         "
       ></div>
-      <div style="font-size: 24px; font-weight: bold; margin-bottom: 12px; letter-spacing: 2px">
+
+      <div style="font-size: 20px; font-weight: 800; margin-bottom: 6px; letter-spacing: 3px">
         CODE COSMOS
       </div>
-      <div id="loading-text" style="font-size: 14px; opacity: 0.6; font-weight: 300">
-        Orchestrating the universe...
+
+      <!-- Phase message -->
+      <div
+        id="loading-text"
+        style="
+          font-size: 12px;
+          opacity: 0.5;
+          font-weight: 300;
+          margin-bottom: 24px;
+          letter-spacing: 0.5px;
+        "
+      >
+        Starting scan...
+      </div>
+
+      <!-- Progress bar track -->
+      <div
+        style="
+          width: 200px;
+          height: 3px;
+          background: rgba(255, 255, 255, 0.08);
+          border-radius: 2px;
+          overflow: hidden;
+          margin-bottom: 10px;
+          position: relative;
+        "
+      >
+        <div
+          id="loading-bar"
+          style="
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue, #00d2ff), #80d8ff);
+            border-radius: 2px;
+            transition:
+              width 0.3s ease,
+              background 0.5s ease;
+          "
+        ></div>
+      </div>
+
+      <!-- Percentage -->
+      <div
+        id="loading-pct"
+        style="
+          font-size: 11px;
+          opacity: 0.35;
+          letter-spacing: 1px;
+          font-variant-numeric: tabular-nums;
+        "
+      >
+        0%
       </div>
     </div>
 
@@ -626,8 +678,10 @@
         <kbd>P</kbd><span>Capture high-res screenshot</span> <kbd>?</kbd
         ><span>Open this command list</span> <kbd>W A S D</kbd><span>Fly (Pilot mode only)</span>
         <kbd>Q / E</kbd><span>Ascend / Descend (Pilot mode only)</span> <kbd>Shift</kbd
-        ><span>Afterburners — speed boost</span> <kbd>Click</kbd><span>Fly to planet / folder</span>
-        <kbd>Ctrl+Click</kbd><span>Show dependencies + open option</span> <kbd>Shift+Click</kbd
+        ><span>Afterburners — speed boost</span> <kbd>Click</kbd
+        ><span>Select / highlight planet or folder</span> <kbd>Alt+Click</kbd
+        ><span>Zoom camera to planet or folder</span> <kbd>Ctrl+Click</kbd
+        ><span>Show dependencies + open option</span> <kbd>Shift+Click</kbd
         ><span>Multi-select planets</span> <kbd>Right-click</kbd
         ><span>Open file, copy path, more actions</span> <kbd>Esc</kbd
         ><span>Exit focus / clear selection / close panels</span>

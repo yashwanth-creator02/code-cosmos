@@ -60,6 +60,8 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   private disposeCallbacks: (() => void)[] = [];
   private visibilityChangeCallbacks: ((visible: boolean) => void)[] = [];
   private becomeVisibleCallbacks: (() => Promise<void>)[] = [];
+  private firstResolveCallbacks: (() => Promise<void>)[] = [];
+  private hasResolved = false;
   private onRefreshCallback: (() => Promise<void>) | null = null;
 
   constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
@@ -80,6 +82,16 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ): void {
     this.view = webviewView;
+
+    // Fire first-resolve callbacks — used by extension.ts to auto-build
+    // when the user first clicks the Activity Bar icon.
+    if (!this.hasResolved) {
+      this.hasResolved = true;
+      // Defer slightly so the webview HTML has a chance to load
+      setTimeout(() => {
+        this.firstResolveCallbacks.forEach((cb) => cb());
+      }, 200);
+    }
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -264,6 +276,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     } else {
       this.pendingSettings = settings;
     }
+  }
+
+  public onFirstResolve(callback: () => Promise<void>): void {
+    this.firstResolveCallbacks.push(callback);
   }
 
   public onDispose(callback: () => void): void {
