@@ -5,7 +5,7 @@
   "version": "0.3.0",
   "publisher": "Yashwanth",
   "license": "MIT",
-  "icon": "images/logo.png",
+  "icon": "assets/logo.png",
   "galleryBanner": {
     "color": "#06060e",
     "theme": "dark"
@@ -41,7 +41,7 @@
       {
         "command": "code-cosmos.openCosmos",
         "title": "Code Cosmos: Open Universe",
-        "icon": "images/logo.png"
+        "icon": "assets/logo.png"
       },
       {
         "command": "code-cosmos.refreshCosmos",
@@ -54,7 +54,7 @@
         {
           "id": "code-cosmos-sidebar",
           "title": "Code Cosmos",
-          "icon": "images/cosmos-icon.svg"
+          "icon": "assets/cosmos-icon.svg"
         }
       ]
     },
@@ -64,7 +64,7 @@
           "type": "webview",
           "id": "codeCosmos.sidebarView",
           "name": "Universe",
-          "icon": "images/logo.png",
+          "icon": "assets/logo.png",
           "contextualTitle": "Code Cosmos"
         }
       ]
