@@ -14,7 +14,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { SettingsState, DEFAULT_SETTINGS } from '../types';
+import { SettingsState, DEFAULT_SETTINGS, CameraState, NavigationData } from '../types';
 import { logger } from '../utils/logger';
 
 const SCHEMA_VERSION = 1;
@@ -32,20 +32,11 @@ export interface CosmosFileData {
 
   preferences: SettingsState;
 
-  navigation: {
-    homePosition: CameraState | null;
-    namedSlots: Array<{ name: string; camera: CameraState }>;
-    cameraHistory: CameraState[];
-  };
+  navigation: NavigationData;
 
   // Spatial overrides — positions the developer has manually adjusted
   // Keys are file/folder IDs (relative paths). Values are position deltas.
   spatialOverrides: Record<string, { offsetX: number; offsetY: number; offsetZ: number }>;
-}
-
-export interface CameraState {
-  position: { x: number; y: number; z: number };
-  target: { x: number; y: number; z: number };
 }
 
 const DEFAULT_COSMOS_DATA: Omit<CosmosFileData, 'version' | 'projectId' | 'lastSaved'> = {
@@ -151,6 +142,22 @@ export async function savePreferences(
 ): Promise<void> {
   const existing = await readCosmosFile(workspaceRoot);
   await writeCosmosFile(workspaceRoot, { ...existing, preferences });
+}
+
+/**
+ * Write a partial navigation update — preserves preferences, spatial overrides,
+ * and any navigation fields not included in the partial. Used by camera
+ * bookmarks (namedSlots), home position, and camera history.
+ */
+export async function saveNavigation(
+  workspaceRoot: vscode.WorkspaceFolder,
+  navigation: Partial<NavigationData>
+): Promise<void> {
+  const existing = await readCosmosFile(workspaceRoot);
+  await writeCosmosFile(workspaceRoot, {
+    ...existing,
+    navigation: { ...existing.navigation, ...navigation },
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -2,64 +2,92 @@
 
 <!doctype html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="{{cspSource}}" />
-    <link rel="stylesheet" href="{{styleUri}}" />
-  </head>
 
-  <body
-    style="margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #020408"
-  >
-    <canvas
-      id="cosmos-canvas"
-      style="position: absolute; inset: 0; width: 100%; height: 100%; display: block"
-    ></canvas>
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="{{cspSource}}" />
+  <link rel="stylesheet" href="{{styleUri}}" />
+</head>
 
-    <!-- Loading overlay -->
-    <div
-      id="loading-overlay"
-      style="
+<body style="margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #020408">
+  <canvas id="cosmos-canvas" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block"></canvas>
+
+  <!-- Loading overlay — shows scan progress with live percentage -->
+  <div id="loading-overlay" style="
         position: fixed;
         top: 0;
         left: 0;
         width: 100%;
         height: 100%;
-        background: black;
+        background: #020408;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         z-index: 1000;
-      "
-    >
-      <div
-        id="loading-sun"
-        style="
-          width: 80px;
-          height: 80px;
+      ">
+    <!-- Pulsing star -->
+    <div id="loading-sun" style="
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
           background: radial-gradient(circle, #fff5c0, #ffaa00, #ff4400);
           box-shadow:
-            0 0 40px #ffaa00,
-            0 0 80px #ff6600;
+            0 0 30px #ffaa00,
+            0 0 60px #ff6600;
           animation: pulse 1.5s ease-in-out infinite;
-          margin-bottom: 32px;
-        "
-      ></div>
-      <div style="font-size: 24px; font-weight: bold; margin-bottom: 12px; letter-spacing: 2px">
-        CODE COSMOS
-      </div>
-      <div id="loading-text" style="font-size: 14px; opacity: 0.6; font-weight: 300">
-        Orchestrating the universe...
-      </div>
+          margin-bottom: 28px;
+        "></div>
+
+    <div style="font-size: 20px; font-weight: 800; margin-bottom: 6px; letter-spacing: 3px">
+      CODE COSMOS
     </div>
 
-    <!-- Tooltip -->
-    <div
-      id="tooltip"
-      class="glass-panel"
-      style="
+    <!-- Phase message -->
+    <div id="loading-text" style="
+          font-size: 12px;
+          opacity: 0.5;
+          font-weight: 300;
+          margin-bottom: 24px;
+          letter-spacing: 0.5px;
+        ">
+      Starting scan...
+    </div>
+
+    <!-- Progress bar track -->
+    <div style="
+          width: 200px;
+          height: 3px;
+          background: rgba(255, 255, 255, 0.08);
+          border-radius: 2px;
+          overflow: hidden;
+          margin-bottom: 10px;
+          position: relative;
+        ">
+      <div id="loading-bar" style="
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue, #00d2ff), #80d8ff);
+            border-radius: 2px;
+            transition:
+              width 0.3s ease,
+              background 0.5s ease;
+          "></div>
+    </div>
+
+    <!-- Percentage -->
+    <div id="loading-pct" style="
+          font-size: 11px;
+          opacity: 0.35;
+          letter-spacing: 1px;
+          font-variant-numeric: tabular-nums;
+        ">
+      0%
+    </div>
+  </div>
+
+  <!-- Tooltip -->
+  <div id="tooltip" class="glass-panel" style="
         position: fixed;
         display: none;
         padding: 12px 16px;
@@ -68,14 +96,10 @@
         z-index: 1000;
         line-height: 1.6;
         max-width: 250px;
-      "
-    ></div>
+      "></div>
 
-    <!-- Repo header: repo name + branch, shown once data is loaded -->
-    <div
-      id="git-hud"
-      class="glass-panel"
-      style="
+  <!-- Repo header: repo name + branch, shown once data is loaded -->
+  <div id="git-hud" class="glass-panel" style="
         position: fixed;
         top: 16px;
         left: 16px;
@@ -85,26 +109,16 @@
         display: none;
         align-items: center;
         gap: 10px;
-      "
-    >
-      <span
-        id="repo-name"
-        style="font-weight: 700; font-size: 13px; color: var(--accent-gold); letter-spacing: 0.3px"
-      ></span>
-      <span style="opacity: 0.25; font-size: 10px">·</span>
-      <span style="opacity: 0.5; font-size: 11px">&#x2387;</span>
-      <span
-        id="git-branch"
-        style="font-weight: 600; letter-spacing: 0.5px; color: var(--accent-blue)"
-        >—</span
-      >
-    </div>
+      ">
+    <span id="repo-name"
+      style="font-weight: 700; font-size: 13px; color: var(--accent-gold); letter-spacing: 0.3px"></span>
+    <span style="opacity: 0.25; font-size: 10px">·</span>
+    <span style="opacity: 0.5; font-size: 11px">&#x2387;</span>
+    <span id="git-branch" style="font-weight: 600; letter-spacing: 0.5px; color: var(--accent-blue)">—</span>
+  </div>
 
-    <!-- Minimap -->
-    <div
-      id="minimap-container"
-      class="glass-panel"
-      style="
+  <!-- Minimap -->
+  <div id="minimap-container" class="glass-panel" style="
         position: fixed;
         bottom: 80px;
         right: 20px;
@@ -114,11 +128,9 @@
         z-index: 100;
         cursor: crosshair;
         display: none;
-      "
-    >
-      <canvas id="minimap-canvas" width="160" height="160"></canvas>
-      <div
-        style="
+      ">
+    <canvas id="minimap-canvas" width="160" height="160"></canvas>
+    <div style="
           position: absolute;
           top: 6px;
           left: 10px;
@@ -127,17 +139,13 @@
           opacity: 0.3;
           letter-spacing: 1px;
           pointer-events: none;
-        "
-      >
-        MINIMAP
-      </div>
+        ">
+      MINIMAP
     </div>
+  </div>
 
-    <!-- Search -->
-    <div
-      id="search-container"
-      class="glass-panel"
-      style="
+  <!-- Search -->
+  <div id="search-container" class="glass-panel" style="
         position: fixed;
         top: 20px;
         left: 50%;
@@ -146,13 +154,8 @@
         display: none;
         padding: 4px;
         width: 320px;
-      "
-    >
-      <input
-        id="search-input"
-        type="text"
-        placeholder="Search files ( / )..."
-        style="
+      ">
+    <input id="search-input" type="text" placeholder="Search files ( / )..." style="
           background: transparent;
           border: none;
           color: white;
@@ -161,23 +164,17 @@
           width: 100%;
           outline: none;
           box-sizing: border-box;
-        "
-      />
-      <div
-        id="search-results"
-        style="
+        " />
+    <div id="search-results" style="
           border-top: 1px solid var(--glass-border);
           max-height: 250px;
           overflow-y: auto;
           display: none;
-        "
-      ></div>
-    </div>
+        "></div>
+  </div>
 
-    <!-- Control Bar -->
-    <div
-      id="control-bar"
-      style="
+  <!-- Control Bar -->
+  <div id="control-bar" style="
         position: fixed;
         bottom: 20px;
         right: 20px;
@@ -185,19 +182,15 @@
         gap: 10px;
         z-index: 500;
         align-items: center;
-      "
-    >
-      <button id="help-button" class="control-btn" title="Keyboard Shortcuts (?)">❔</button>
-      <button id="settings-btn" class="control-btn" title="Settings (G)">⚙️</button>
-      <button id="filter-btn" class="control-btn" title="File Filter (T)">🏷️</button>
-      <button id="minimap-btn" class="control-btn" title="Minimap (M)">🗺️</button>
-      <button id="export-btn" class="control-btn" title="Screenshot (P)">📸</button>
-      <button id="refresh-universe" class="control-btn" title="Refresh (Ctrl+U / F5)">🔄</button>
-      <div style="width: 1px; height: 24px; background: var(--glass-border); margin: 0 4px"></div>
-      <button
-        id="reset-camera"
-        class="glass-panel"
-        style="
+      ">
+    <button id="help-button" class="control-btn" title="Keyboard shortcuts (H)">❔</button>
+    <button id="settings-btn" class="control-btn" title="Settings (G)">⚙️</button>
+    <button id="filter-btn" class="control-btn" title="File Filter (T)">🏷️</button>
+    <button id="minimap-btn" class="control-btn" title="Minimap (M)">🗺️</button>
+    <button id="export-btn" class="control-btn" title="Screenshot (P)">📸</button>
+    <button id="refresh-universe" class="control-btn" title="Refresh (Ctrl+U / F5)">🔄</button>
+    <div style="width: 1px; height: 24px; background: var(--glass-border); margin: 0 4px"></div>
+    <button id="reset-camera" class="glass-panel" style="
           height: 38px;
           padding: 0 16px;
           color: white;
@@ -208,17 +201,13 @@
           align-items: center;
           gap: 8px;
           transition: all 0.2s ease;
-        "
-      >
-        <span>⟳</span> Reset View
-      </button>
-    </div>
+        ">
+      <span>⟳</span> Reset View
+    </button>
+  </div>
 
-    <!-- Exit Focus Mode Button — only visible during focus mode -->
-    <div
-      id="exit-focus-btn"
-      class="glass-panel"
-      style="
+  <!-- Exit Focus Mode Button — only visible during focus mode -->
+  <div id="exit-focus-btn" class="glass-panel" style="
         position: fixed;
         top: 20px;
         left: 50%;
@@ -235,11 +224,9 @@
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 20px;
         user-select: none;
-      "
-    >
-      <span style="opacity: 0.6">◉</span> Focus Mode
-      <span
-        style="
+      ">
+    <span style="opacity: 0.6">◉</span> Focus Mode
+    <span style="
           background: rgba(255, 255, 255, 0.08);
           border: 1px solid rgba(255, 255, 255, 0.15);
           border-radius: 4px;
@@ -247,16 +234,11 @@
           font-size: 10px;
           font-family: monospace;
           opacity: 0.7;
-        "
-        >Esc</span
-      >
-    </div>
+        ">Esc</span>
+  </div>
 
-    <!-- Mode Indicator -->
-    <div
-      id="mode-indicator"
-      class="glass-panel"
-      style="
+  <!-- Mode Indicator -->
+  <div id="mode-indicator" class="glass-panel" style="
         position: fixed;
         bottom: 75px;
         right: 20px;
@@ -266,14 +248,36 @@
         transition: all 0.4s ease;
         z-index: 100;
         border-color: var(--accent-blue);
-      "
-    ></div>
+      ">
+    <!-- On-screen Escape button — for touch/trackpad users without physical keyboard.
+         Always visible, positioned bottom-left so it doesn't compete with minimap.
+         Triggers the same unified Escape handler as the keyboard key. -->
+    <div id="onscreen-esc-btn" title="Escape — close panels / exit focus / clear selection" style="
+          position: fixed;
+          bottom: 16px;
+          left: 16px;
+          background: rgba(10, 14, 26, 0.75);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 8px;
+          padding: 5px 12px;
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.45);
+          cursor: pointer;
+          z-index: 200;
+          backdrop-filter: blur(10px);
+          user-select: none;
+          font-family: monospace;
+          letter-spacing: 0.5px;
+          transition:
+            opacity 0.2s ease,
+            border-color 0.2s ease;
+        ">
+      Esc
+    </div>
+  </div>
 
-    <!-- Legend -->
-    <div
-      id="legend"
-      class="glass-panel"
-      style="
+  <!-- Legend -->
+  <div id="legend" class="glass-panel" style="
         position: fixed;
         bottom: 20px;
         left: 20px;
@@ -282,51 +286,43 @@
         z-index: 100;
         line-height: 2;
         min-width: 180px;
-      "
-    >
-      <div
-        style="
+      ">
+    <div style="
           font-weight: bold;
           margin-bottom: 10px;
           opacity: 0.5;
           font-size: 10px;
           letter-spacing: 1.5px;
-        "
-      >
-        CONNECTIONS
-      </div>
-      <div><span style="color: #ffffff; margin-right: 8px">●</span> Direct import</div>
-      <div><span style="color: #4488ff; margin-right: 8px">●</span> Indirect chain</div>
-      <div><span style="color: #ffb300; margin-right: 8px">●</span> Shared dependent</div>
-      <div><span style="color: #00bcd4; margin-right: 8px">●</span> Shared dependency</div>
-      <div><span style="color: #ff1744; margin-right: 8px">●</span> Circular (Danger)</div>
-      <div
-        style="
+        ">
+      CONNECTIONS
+    </div>
+    <div><span style="color: #ffffff; margin-right: 8px">●</span> Direct import</div>
+    <div><span style="color: #4488ff; margin-right: 8px">●</span> Indirect chain</div>
+    <div><span style="color: #ffb300; margin-right: 8px">●</span> Shared dependent</div>
+    <div><span style="color: #00bcd4; margin-right: 8px">●</span> Shared dependency</div>
+    <div><span style="color: #ff1744; margin-right: 8px">●</span> Circular (Danger)</div>
+    <div style="
           margin-top: 14px;
           font-weight: bold;
           opacity: 0.5;
           font-size: 10px;
           letter-spacing: 1.5px;
-        "
-      >
-        ENTITIES
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px">
-        ⭐ <span style="opacity: 0.9">Root Repository</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px">
-        🔆 <span style="opacity: 0.9">Directory (Star)</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px">
-        ● <span style="opacity: 0.9">File (Planet)</span>
-      </div>
+        ">
+      ENTITIES
     </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      ⭐ <span style="opacity: 0.9">Root Repository</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      🔆 <span style="opacity: 0.9">Directory (Star)</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      ● <span style="opacity: 0.9">File (Planet)</span>
+    </div>
+  </div>
 
-    <!-- Settings Panel -->
-    <div
-      id="settings-panel"
-      class="glass-panel"
-      style="
+  <!-- Settings Panel -->
+  <div id="settings-panel" class="glass-panel" style="
         position: fixed;
         top: 50%;
         right: 20px;
@@ -337,29 +333,23 @@
         width: 260px;
         max-height: 80vh;
         overflow-y: auto;
-      "
-    >
-      <div
-        style="
+      ">
+    <div style="
           display: flex;
           align-items: center;
           justify-content: space-between;
           margin-bottom: 20px;
-        "
-      >
-        <span style="font-weight: bold; font-size: 16px">Settings</span>
-        <span style="opacity: 0.4; font-size: 11px">(G)</span>
-      </div>
+        ">
+      <span style="font-weight: bold; font-size: 16px">Settings</span>
+      <span style="opacity: 0.4; font-size: 11px">(G)</span>
+    </div>
 
-      <div style="margin-bottom: 20px">
-        <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1px; margin-bottom: 10px">
-          PRESETS
-        </div>
-        <div style="display: flex; gap: 8px">
-          <button
-            class="preset-btn"
-            data-preset="clean"
-            style="
+    <div style="margin-bottom: 20px">
+      <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1px; margin-bottom: 10px">
+        PRESETS
+      </div>
+      <div style="display: flex; gap: 8px">
+        <button class="preset-btn" data-preset="clean" style="
               flex: 1;
               padding: 6px;
               background: rgba(255, 255, 255, 0.08);
@@ -368,14 +358,10 @@
               border-radius: 6px;
               cursor: pointer;
               font-size: 11px;
-            "
-          >
-            Clean
-          </button>
-          <button
-            class="preset-btn"
-            data-preset="full"
-            style="
+            ">
+          Clean
+        </button>
+        <button class="preset-btn" data-preset="full" style="
               flex: 1;
               padding: 6px;
               background: rgba(255, 255, 255, 0.08);
@@ -384,14 +370,10 @@
               border-radius: 6px;
               cursor: pointer;
               font-size: 11px;
-            "
-          >
-            Full
-          </button>
-          <button
-            class="preset-btn"
-            data-preset="performance"
-            style="
+            ">
+          Full
+        </button>
+        <button class="preset-btn" data-preset="performance" style="
               flex: 1;
               padding: 6px;
               background: rgba(255, 255, 255, 0.08);
@@ -400,156 +382,144 @@
               border-radius: 6px;
               cursor: pointer;
               font-size: 11px;
-            "
-          >
-            Perf
-          </button>
-        </div>
+            ">
+          Perf
+        </button>
       </div>
+    </div>
 
-      <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1px; margin-bottom: 8px">
-        GRAPH VISIBILITY
-      </div>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px">
-        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-          ><input type="checkbox" id="s-direct" checked /> Direct</label
-        >
-        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-          ><input type="checkbox" id="s-indirect" /> Indirect</label
-        >
-        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-          ><input type="checkbox" id="s-layer3" /> Shared</label
-        >
-        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-          ><input type="checkbox" id="s-circular" checked /> Circular</label
-        >
-      </div>
+    <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1px; margin-bottom: 8px">
+      GRAPH VISIBILITY
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px">
+      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox" id="s-direct"
+          checked /> Direct</label>
+      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox"
+          id="s-indirect" /> Indirect</label>
+      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox"
+          id="s-layer3" /> Shared</label>
+      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox"
+          id="s-circular" checked /> Circular</label>
+    </div>
 
-      <div
-        style="
+    <div style="
           margin-top: 20px;
           opacity: 0.5;
           font-size: 10px;
           letter-spacing: 1px;
           margin-bottom: 8px;
-        "
-      >
-        MOTION
-      </div>
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-        ><input type="checkbox" id="s-animation" /> Orbital Orbits</label
-      >
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px"
-        ><input type="checkbox" id="s-star-rotation" checked /> Star Self-Rotation</label
-      >
-      <div
-        style="
-          margin-top: 12px;
-          background: rgba(255, 255, 255, 0.05);
-          padding: 10px;
-          border-radius: 8px;
-        "
-      >
-        <div
-          style="
+        ">
+      LAYOUT
+    </div>
+    <div style="background: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 8px">
+      <div style="
             display: flex;
             justify-content: space-between;
             opacity: 0.7;
             font-size: 11px;
             margin-bottom: 4px;
-          "
-        >
-          <span>Orbit Speed</span>
-          <span id="speed-val">1.0x</span>
-        </div>
-        <input
-          type="range"
-          id="s-speed"
-          min="0.1"
-          max="4"
-          step="0.1"
-          value="1"
-          style="width: 100%; cursor: pointer"
-        />
+          ">
+        <span>Spacing</span>
+        <span id="spacing-val">1.0x</span>
       </div>
+      <input type="range" id="s-spacing" min="0.5" max="2.5" step="0.1" value="1"
+        style="width: 100%; cursor: pointer" />
+      <div style="font-size: 10px; opacity: 0.4; margin-top: 4px; line-height: 1.4">
+        Spreads planets and folders further apart — increase if things feel clumped together.
+      </div>
+    </div>
 
-      <div
-        style="
+    <div style="
           margin-top: 20px;
           opacity: 0.5;
           font-size: 10px;
           letter-spacing: 1px;
           margin-bottom: 8px;
-        "
-      >
-        LABELS & HUD
+        ">
+      MOTION
+    </div>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox"
+        id="s-animation" /> Orbital Orbits</label>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px"><input type="checkbox"
+        id="s-star-rotation" checked /> Star Self-Rotation</label>
+    <div style="
+          margin-top: 12px;
+          background: rgba(255, 255, 255, 0.05);
+          padding: 10px;
+          border-radius: 8px;
+        ">
+      <div style="
+            display: flex;
+            justify-content: space-between;
+            opacity: 0.7;
+            font-size: 11px;
+            margin-bottom: 4px;
+          ">
+        <span>Orbit Speed</span>
+        <span id="speed-val">1.0x</span>
       </div>
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-        ><input type="checkbox" id="s-folder-labels" checked /> Folder Labels</label
-      >
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"
-        ><input type="checkbox" id="s-proximity-labels" checked /> Planet Proximity Labels</label
-      >
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"
-        ><input type="checkbox" id="s-legend" checked /> Show Legend</label
-      >
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"
-        ><input type="checkbox" id="s-minimap" /> Show Minimap</label
-      >
+      <input type="range" id="s-speed" min="0.1" max="4" step="0.1" value="1" style="width: 100%; cursor: pointer" />
+    </div>
 
-      <div
-        style="
+    <div style="
           margin-top: 20px;
           opacity: 0.5;
           font-size: 10px;
           letter-spacing: 1px;
           margin-bottom: 8px;
-        "
-      >
-        VISUAL EFFECTS
-      </div>
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
-        ><input type="checkbox" id="s-bg-stars" checked /> Stellar Background</label
-      >
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"
-        ><input type="checkbox" id="s-fog" checked /> Depth Fog</label
-      >
-      <label
-        style="
+        ">
+      LABELS & HUD
+    </div>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox"
+        id="s-folder-labels" checked /> Folder Labels</label>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"><input type="checkbox"
+        id="s-proximity-labels" checked /> Planet Proximity Labels</label>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"><input type="checkbox"
+        id="s-legend" checked /> Show Legend</label>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"><input type="checkbox"
+        id="s-minimap" /> Show Minimap</label>
+
+    <div style="
+          margin-top: 20px;
+          opacity: 0.5;
+          font-size: 10px;
+          letter-spacing: 1px;
+          margin-bottom: 8px;
+        ">
+      VISUAL EFFECTS
+    </div>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"><input type="checkbox" id="s-bg-stars"
+        checked /> Stellar Background</label>
+    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 4px"><input type="checkbox"
+        id="s-fog" checked /> Depth Fog</label>
+    <label style="
           display: flex;
           align-items: center;
           gap: 6px;
           cursor: pointer;
           margin-top: 4px;
           color: var(--accent-blue);
-        "
-        ><input type="checkbox" id="s-heatmap" /> 🔥 Git Churn Heatmap</label
-      >
+        "><input type="checkbox" id="s-heatmap" /> 🔥 Git Churn Heatmap</label>
 
-      <div style="margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 16px">
-        <label
-          style="
+    <div style="margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 16px">
+      <label style="
             display: flex;
             align-items: center;
             gap: 8px;
             cursor: pointer;
             color: var(--accent-gold);
             font-weight: bold;
-          "
-        >
-          <input type="checkbox" id="s-performance" /> ⚡ Performance Mode
-        </label>
-        <div style="font-size: 9px; opacity: 0.5; margin-top: 4px; margin-left: 24px">
-          Reduces geometry quality for smoother FPS.
-        </div>
+          ">
+        <input type="checkbox" id="s-performance" /> ⚡ Performance Mode
+      </label>
+      <div style="font-size: 9px; opacity: 0.5; margin-top: 4px; margin-left: 24px">
+        Reduces geometry quality for smoother FPS.
       </div>
     </div>
+  </div>
 
-    <!-- Shortcuts Panel -->
-    <div
-      id="shortcuts-panel"
-      class="glass-panel"
-      style="
+  <!-- Shortcuts Panel -->
+  <div id="shortcuts-panel" class="glass-panel" style="
         position: fixed;
         top: 50%;
         left: 50%;
@@ -558,59 +528,49 @@
         z-index: 700;
         display: none;
         min-width: 400px;
-      "
-    >
-      <div
-        style="
+      ">
+    <div style="
           font-weight: bold;
           font-size: 20px;
           margin-bottom: 24px;
           display: flex;
           align-items: center;
           gap: 12px;
-        "
-      >
-        <span>⌨️</span> Command Center
-      </div>
-      <div
-        style="
+        ">
+      <span>⌨️</span> Command Center
+    </div>
+    <div style="
           display: grid;
           grid-template-columns: auto 1fr;
           gap: 10px 24px;
           font-size: 13px;
           line-height: 1.8;
-        "
-      >
-        <kbd>/</kbd><span>Focus search bar</span> <kbd>F</kbd
-        ><span>Toggle spacecraft pilot mode</span> <kbd>R</kbd><span>Recenter camera on root</span>
-        <kbd>G</kbd><span>Toggle settings panel</span> <kbd>M</kbd
-        ><span>Toggle minimap overlay</span> <kbd>T</kbd><span>Toggle file type filters</span>
-        <kbd>P</kbd><span>Capture high-res screenshot</span> <kbd>?</kbd
-        ><span>Open this command list</span> <kbd>W A S D</kbd><span>Fly (Pilot mode only)</span>
-        <kbd>Q / E</kbd><span>Ascend / Descend (Pilot mode only)</span> <kbd>Shift</kbd
-        ><span>Afterburners — speed boost</span> <kbd>Click</kbd
-        ><span>Inspect planet / folder</span> <kbd>Shift+Click</kbd
-        ><span>Multi-select planets</span> <kbd>Esc</kbd
-        ><span>Exit focus / clear selection / close panels</span>
-      </div>
-      <div
-        style="
+        ">
+      <kbd>/</kbd><span>Focus search bar</span> <kbd>F</kbd><span>Toggle spacecraft pilot mode</span>
+      <kbd>R</kbd><span>Recenter camera on root</span>
+      <kbd>G</kbd><span>Toggle settings panel</span> <kbd>M</kbd><span>Toggle minimap overlay</span>
+      <kbd>T</kbd><span>Toggle file type filters</span>
+      <kbd>P</kbd><span>Capture high-res screenshot</span> <kbd>?</kbd><span>Open this command list</span> <kbd>W A S
+        D</kbd><span>Fly (Pilot mode only)</span>
+      <kbd>Q / E</kbd><span>Ascend / Descend (Pilot mode only)</span> <kbd>Shift</kbd><span>Afterburners — speed
+        boost</span> <kbd>Click</kbd><span>Select / highlight planet or folder</span> <kbd>Alt+Click</kbd><span>Zoom
+        camera to planet or folder</span> <kbd>Ctrl+Click</kbd><span>Show dependencies + open option</span>
+      <kbd>Shift+Click</kbd><span>Multi-select planets</span> <kbd>Right-click</kbd><span>Open file, copy path, more
+        actions</span> <kbd>Esc</kbd><span>Exit focus / clear selection / close panels</span>
+    </div>
+    <div style="
           margin-top: 32px;
           opacity: 0.3;
           font-size: 11px;
           text-align: center;
           letter-spacing: 1px;
-        "
-      >
-        PRESS ANY KEY OR ESC TO DISMISS
-      </div>
+        ">
+      PRESS ANY KEY OR ESC TO DISMISS
     </div>
+  </div>
 
-    <!-- Filter Panel -->
-    <div
-      id="filter-bar"
-      class="glass-panel"
-      style="
+  <!-- Filter Panel -->
+  <div id="filter-bar" class="glass-panel" style="
         position: fixed;
         top: 75px;
         left: 20px;
@@ -621,35 +581,27 @@
         max-height: 70vh;
         width: 200px;
         padding: 20px;
-      "
-    >
-      <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1.5px; font-weight: bold">
-        RESOURCES TYPES
-      </div>
-      <div
-        id="filter-buttons"
-        style="
+      ">
+    <div style="opacity: 0.5; font-size: 10px; letter-spacing: 1.5px; font-weight: bold">
+      RESOURCES TYPES
+    </div>
+    <div id="filter-buttons" style="
           display: flex;
           flex-direction: column;
           gap: 6px;
           overflow-y: auto;
           padding-right: 4px;
-        "
-      >
-        <!-- Dynamic -->
-      </div>
-      <div
-        style="
+        ">
+      <!-- Dynamic -->
+    </div>
+    <div style="
           display: flex;
           gap: 8px;
           margin-top: 4px;
           border-top: 1px solid var(--glass-border);
           padding-top: 12px;
-        "
-      >
-        <button
-          id="filter-all"
-          style="
+        ">
+      <button id="filter-all" style="
             flex: 1;
             padding: 6px;
             background: rgba(255, 255, 255, 0.08);
@@ -658,13 +610,10 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 11px;
-          "
-        >
-          All
-        </button>
-        <button
-          id="filter-none"
-          style="
+          ">
+        All
+      </button>
+      <button id="filter-none" style="
             flex: 1;
             padding: 6px;
             background: rgba(255, 255, 255, 0.08);
@@ -673,17 +622,14 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 11px;
-          "
-        >
-          None
-        </button>
-      </div>
+          ">
+        None
+      </button>
     </div>
+  </div>
 
-    <!-- Onboarding overlay — shown on first launch, recallable via ? key -->
-    <div
-      id="onboarding-overlay"
-      style="
+  <!-- Onboarding overlay — shown on first launch, recallable via ? key -->
+  <div id="onboarding-overlay" style="
         position: fixed;
         inset: 0;
         background: rgba(2, 4, 8, 0.88);
@@ -692,22 +638,17 @@
         display: none;
         align-items: center;
         justify-content: center;
-      "
-    >
-      <div
-        class="glass-panel"
-        style="
+      ">
+    <div class="glass-panel" style="
           max-width: 480px;
           width: calc(100% - 32px);
           padding: 28px 24px;
           text-align: center;
           border-radius: 20px;
           box-sizing: border-box;
-        "
-      >
-        <!-- Logo pulse -->
-        <div
-          style="
+        ">
+      <!-- Logo pulse -->
+      <div style="
             width: 64px;
             height: 64px;
             border-radius: 50%;
@@ -717,87 +658,75 @@
               0 0 60px #ff6600;
             margin: 0 auto 24px;
             animation: pulse 1.5s ease-in-out infinite;
-          "
-        ></div>
+          "></div>
 
-        <div style="font-size: 22px; font-weight: 800; letter-spacing: 2px; margin-bottom: 6px">
-          CODE COSMOS
-        </div>
-        <div style="font-size: 12px; opacity: 0.4; letter-spacing: 3px; margin-bottom: 32px">
-          YOUR CODEBASE AS A UNIVERSE
-        </div>
+      <div style="font-size: 22px; font-weight: 800; letter-spacing: 2px; margin-bottom: 6px">
+        CODE COSMOS
+      </div>
+      <div style="font-size: 12px; opacity: 0.4; letter-spacing: 3px; margin-bottom: 32px">
+        YOUR CODEBASE AS A UNIVERSE
+      </div>
 
-        <!-- Four concept cards -->
-        <div
-          style="
+      <!-- Four concept cards -->
+      <div style="
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 10px;
             margin-bottom: 24px;
             text-align: left;
-          "
-        >
-          <div
-            style="
+          ">
+        <div style="
               background: rgba(255, 255, 255, 0.04);
               border: 1px solid rgba(255, 255, 255, 0.08);
               border-radius: 12px;
               padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🌟</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Stars</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Folders &amp; modules. Size reflects how many files they contain.
-            </div>
-          </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🪐</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Planets</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Individual files. Size = file weight. Brightness = recent activity.
-            </div>
-          </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">✨</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Lines</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Imports between files. Red lines = circular dependencies.
-            </div>
-          </div>
-          <div
-            style="
-              background: rgba(255, 255, 255, 0.04);
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              border-radius: 12px;
-              padding: 16px;
-            "
-          >
-            <div style="font-size: 22px; margin-bottom: 8px">🔥</div>
-            <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Heat</div>
-            <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
-              Brighter planets = touched recently. Dimmer = stable or unused.
-            </div>
+            ">
+          <div style="font-size: 22px; margin-bottom: 8px">🌟</div>
+          <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Stars</div>
+          <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
+            Folders &amp; modules. Size reflects how many files they contain.
           </div>
         </div>
+        <div style="
+              background: rgba(255, 255, 255, 0.04);
+              border: 1px solid rgba(255, 255, 255, 0.08);
+              border-radius: 12px;
+              padding: 16px;
+            ">
+          <div style="font-size: 22px; margin-bottom: 8px">🪐</div>
+          <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Planets</div>
+          <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
+            Individual files. Size = file weight. Brightness = recent activity.
+          </div>
+        </div>
+        <div style="
+              background: rgba(255, 255, 255, 0.04);
+              border: 1px solid rgba(255, 255, 255, 0.08);
+              border-radius: 12px;
+              padding: 16px;
+            ">
+          <div style="font-size: 22px; margin-bottom: 8px">✨</div>
+          <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Lines</div>
+          <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
+            Imports between files. Red lines = circular dependencies.
+          </div>
+        </div>
+        <div style="
+              background: rgba(255, 255, 255, 0.04);
+              border: 1px solid rgba(255, 255, 255, 0.08);
+              border-radius: 12px;
+              padding: 16px;
+            ">
+          <div style="font-size: 22px; margin-bottom: 8px">🔥</div>
+          <div style="font-weight: 700; font-size: 12px; margin-bottom: 4px">Heat</div>
+          <div style="font-size: 11px; opacity: 0.55; line-height: 1.5">
+            Brighter planets = touched recently. Dimmer = stable or unused.
+          </div>
+        </div>
+      </div>
 
-        <!-- Quick tip row -->
-        <div
-          style="
+      <!-- Quick tip row -->
+      <div style="
             display: flex;
             gap: 16px;
             justify-content: center;
@@ -805,91 +734,66 @@
             font-size: 11px;
             opacity: 0.5;
             margin-bottom: 32px;
-          "
-        >
-          <span
-            ><kbd
-              style="
+          ">
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >/</kbd
-            >
-            Search</span
-          >
-          <span
-            ><kbd
-              style="
+              ">/</kbd>
+          Search</span>
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >Click</kbd
-            >
-            Focus file</span
-          >
-          <span
-            ><kbd
-              style="
+              ">Click</kbd>
+          Fly to planet</span>
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >Shift+Click</kbd
-            >
-            Select &amp; trace</span
-          >
-          <span
-            ><kbd
-              style="
+              ">Ctrl+Click</kbd>
+          Show dependencies</span>
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >Right-click</kbd
-            >
-            More actions</span
-          >
-          <span
-            ><kbd
-              style="
+              ">Shift+Click</kbd>
+          Select &amp; trace</span>
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >G</kbd
-            >
-            Settings</span
-          >
-          <span
-            ><kbd
-              style="
+              ">Right-click</kbd>
+          More actions</span>
+        <span><kbd style="
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 4px;
                 padding: 2px 7px;
                 font-size: 10px;
-              "
-              >?</kbd
-            >
-            This guide</span
-          >
-        </div>
+              ">G</kbd>
+          Settings</span>
+        <span><kbd style="
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 2px 7px;
+                font-size: 10px;
+              ">?</kbd>
+          This guide</span>
+      </div>
 
-        <button
-          id="onboarding-dismiss"
-          style="
+      <button id="onboarding-dismiss" style="
             background: var(--accent-blue);
             border: none;
             border-radius: 10px;
@@ -901,20 +805,17 @@
             cursor: pointer;
             transition: opacity 0.2s ease;
             width: 100%;
-          "
-        >
-          Explore the Cosmos
-        </button>
-        <div style="font-size: 10px; opacity: 0.3; margin-top: 12px; letter-spacing: 0.5px">
-          Press <kbd style="font-size: 9px">?</kbd> anytime to bring this back
-        </div>
+          ">
+        Explore the Cosmos
+      </button>
+      <div style="font-size: 10px; opacity: 0.3; margin-top: 12px; letter-spacing: 0.5px">
+        Press <kbd style="font-size: 9px">?</kbd> anytime to bring this back
       </div>
     </div>
+  </div>
 
-    <!-- Beacon chip — floats at bottom-center when active editor is off-screen -->
-    <div
-      id="beacon-chip"
-      style="
+  <!-- Beacon chip — floats at bottom-center when active editor is off-screen -->
+  <div id="beacon-chip" style="
         position: fixed;
         bottom: 72px;
         left: 50%;
@@ -937,30 +838,25 @@
         white-space: nowrap;
         user-select: none;
         max-width: 320px;
-      "
-    >
-      <span
-        style="
+      ">
+    <span style="
           width: 7px;
           height: 7px;
           border-radius: 50%;
           background: var(--accent-blue);
           flex-shrink: 0;
           animation: pulse 1.8s ease-in-out infinite;
-        "
-      ></span>
-      <span
-        id="beacon-filename"
-        style="
+        "></span>
+    <span id="beacon-filename" style="
           overflow: hidden;
           text-overflow: ellipsis;
           color: var(--accent-blue);
           font-weight: 600;
-        "
-      ></span>
-      <span style="opacity: 0.4; font-size: 10px; flex-shrink: 0">— click to locate</span>
-    </div>
+        "></span>
+    <span style="opacity: 0.4; font-size: 10px; flex-shrink: 0">— click to locate</span>
+  </div>
 
-    <script src="{{scriptUri}}"></script>
-  </body>
+  <script src="{{scriptUri}}"></script>
+</body>
+
 </html>

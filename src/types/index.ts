@@ -208,6 +208,9 @@ export interface SettingsState {
 
   // --- Misc ---
   orbitalSpeed: number; // multiplier, applies when enableAnimation is true
+  spacingFactor: number; // multiplies all star/planet distances from origin —
+  // higher = more spread out, less clumped
+  // (analogous to Obsidian's "repel force" slider)
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -221,6 +224,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   enableAnimation: false,
   enableStarRotation: true,
   orbitalSpeed: 1.0,
+  spacingFactor: 1.0,
 
   // Data overlays
   showFolderLabels: true,
@@ -246,6 +250,39 @@ export interface FilterState {
 }
 
 // ---------------------------------------------------------------------------
+// Navigation persistence — camera bookmarks, home position, history.
+// Shared between .cosmos file schema (extension side) and the webview's
+// camera bookmark UI. Defined here so both sides import the same shape.
+// ---------------------------------------------------------------------------
+
+export interface CameraState {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+}
+
+export interface NamedCameraSlot {
+  name: string;
+  camera: CameraState;
+}
+
+export interface NavigationData {
+  homePosition: CameraState | null;
+  namedSlots: NamedCameraSlot[];
+  cameraHistory: CameraState[];
+}
+
+// ---------------------------------------------------------------------------
+// Scan progress — reported during buildAllWorkspaces so the webview can show
+// a loading screen with a percentage rather than an indeterminate spinner.
+// ---------------------------------------------------------------------------
+
+export interface ScanProgressPayload {
+  percent: number; // 0-100, overall across all workspace folders
+  phase: 'scan' | 'parse' | 'git' | 'cache' | 'render';
+  message: string; // human-readable, e.g. "Parsing dependencies (120/450)"
+}
+
+// ---------------------------------------------------------------------------
 // Webview message protocol
 //
 // All messages between extension and webview are typed here.
@@ -255,18 +292,27 @@ export interface FilterState {
 export type MessageToWebview =
   | { type: 'LOAD_UNIVERSE'; payload: CosmosData }
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
+  | { type: 'APPLY_NAVIGATION'; payload: NavigationData }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
+  | { type: 'SCAN_PROGRESS'; payload: ScanProgressPayload }
   | {
-      type: 'COSMOS_STALE';
-      payload: {};
-      // Signals that the file system has changed since the last build.
-      // The webview should show a non-intrusive "refresh available" indicator.
-      // Cleared when LOAD_UNIVERSE is received.
-    };
+    type: 'COSMOS_STALE';
+    payload: {};
+    // Signals that the file system has changed since the last build.
+    // The webview should show a non-intrusive "refresh available" indicator.
+    // Cleared when LOAD_UNIVERSE is received.
+  };
 
 export type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string; line?: number; character?: number } }
   | { type: 'SAVE_SETTINGS'; payload: SettingsState }
+  | {
+    type: 'SAVE_NAVIGATION';
+    payload: Partial<NavigationData>;
+    // Partial — the webview sends only the field(s) that changed
+    // (e.g. just namedSlots when a bookmark is added). CosmosPanel merges
+    // this into the existing .cosmos navigation data, preserving the rest.
+  }
   | { type: 'REFRESH' }
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };

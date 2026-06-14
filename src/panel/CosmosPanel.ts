@@ -19,28 +19,24 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { CosmosData, SettingsState, DEFAULT_SETTINGS } from '../types';
+import {
+  CosmosData,
+  SettingsState,
+  DEFAULT_SETTINGS,
+  NavigationData,
+  MessageToWebview,
+  MessageFromWebview,
+} from '../types';
 import { logger } from '../utils/logger';
-import { readCosmosFile, savePreferences } from '../core/cosmosFile';
+import { readCosmosFile, savePreferences, saveNavigation } from '../core/cosmosFile';
 
 // ---------------------------------------------------------------------------
-// Message types
+// Message types — LoadUniverseMessage narrows the LOAD_UNIVERSE variant of
+// MessageToWebview for the pending-message queue (avoids re-discriminating
+// the union on every read).
 // ---------------------------------------------------------------------------
 
 type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
-
-type MessageToWebview =
-  | LoadUniverseMessage
-  | { type: 'APPLY_SETTINGS'; payload: SettingsState }
-  | { type: 'FOCUS_FILE'; payload: { fileId: string } }
-  | { type: 'COSMOS_STALE'; payload: {} };
-
-type MessageFromWebview =
-  | { type: 'READY' }
-  | { type: 'OPEN_FILE'; payload: { fileId: string; line?: number; character?: number } }
-  | { type: 'SAVE_SETTINGS'; payload: SettingsState }
-  | { type: 'REFRESH' }
-  | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
 
 // ---------------------------------------------------------------------------
 // CosmosPanel — WebviewViewProvider
@@ -59,10 +55,13 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   private isReady = false;
   private pendingMessage: LoadUniverseMessage | null = null;
   private pendingSettings: SettingsState | null = null;
+  private pendingNavigation: NavigationData | null = null;
 
   private disposeCallbacks: (() => void)[] = [];
   private visibilityChangeCallbacks: ((visible: boolean) => void)[] = [];
   private becomeVisibleCallbacks: (() => Promise<void>)[] = [];
+  private firstResolveCallbacks: (() => Promise<void>)[] = [];
+  private hasResolved = false;
   private onRefreshCallback: (() => Promise<void>) | null = null;
 
   constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
@@ -83,6 +82,16 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ): void {
     this.view = webviewView;
+
+    // Fire first-resolve callbacks — used by extension.ts to auto-build
+    // when the user first clicks the Activity Bar icon.
+    if (!this.hasResolved) {
+      this.hasResolved = true;
+      // Defer slightly so the webview HTML has a chance to load
+      setTimeout(() => {
+        this.firstResolveCallbacks.forEach((cb) => cb());
+      }, 200);
+    }
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -128,6 +137,13 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
             });
             this.pendingSettings = null;
           }
+          if (this.pendingNavigation) {
+            webviewView.webview.postMessage({
+              type: 'APPLY_NAVIGATION',
+              payload: this.pendingNavigation,
+            });
+            this.pendingNavigation = null;
+          }
           if (this.pendingMessage) {
             webviewView.webview.postMessage(this.pendingMessage);
             this.lastLoadMessage = this.pendingMessage;
@@ -157,6 +173,20 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
             logger.log('Settings saved to .cosmos and globalState');
           } catch (err) {
             logger.error(`Settings save failed: ${err}`);
+          }
+          break;
+
+        case 'SAVE_NAVIGATION':
+          try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders && workspaceFolders.length > 0) {
+              await saveNavigation(workspaceFolders[0], message.payload);
+              logger.log('Navigation (camera bookmarks) saved to .cosmos');
+            } else {
+              logger.log('SAVE_NAVIGATION received but no workspace open — not persisted');
+            }
+          } catch (err) {
+            logger.error(`Navigation save failed: ${err}`);
           }
           break;
 
@@ -217,12 +247,39 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Async — reads navigation data (camera bookmarks, home position, history)
+   * from the per-project .cosmos file. Returns empty defaults if unavailable.
+   */
+  public async loadNavigationFromCosmosFile(
+    workspaceFolder: vscode.WorkspaceFolder
+  ): Promise<NavigationData> {
+    try {
+      const cosmosData = await readCosmosFile(workspaceFolder);
+      return cosmosData.navigation;
+    } catch {
+      return { homePosition: null, namedSlots: [], cameraHistory: [] };
+    }
+  }
+
+  public sendNavigation(navigation: NavigationData): void {
+    if (this.isReady && this.view) {
+      this.view.webview.postMessage({ type: 'APPLY_NAVIGATION', payload: navigation });
+    } else {
+      this.pendingNavigation = navigation;
+    }
+  }
+
   public sendSettings(settings: SettingsState): void {
     if (this.isReady && this.view) {
       this.view.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
     } else {
       this.pendingSettings = settings;
     }
+  }
+
+  public onFirstResolve(callback: () => Promise<void>): void {
+    this.firstResolveCallbacks.push(callback);
   }
 
   public onDispose(callback: () => void): void {

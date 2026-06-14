@@ -14,6 +14,7 @@ import {
   dedupeDependencies,
 } from './dependencyParser';
 import { readGitData } from './gitReader';
+import { ProgressCallback, noopProgress } from './progress';
 
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
@@ -257,7 +258,8 @@ export function buildStarTree(
 
 export async function buildFileTree(
   workspaceFolder: vscode.WorkspaceFolder,
-  offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }
+  offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 },
+  onProgress: ProgressCallback = noopProgress
 ): Promise<CosmosData> {
   const workspaceRoot = workspaceFolder.uri.fsPath;
   const workspaceName = workspaceFolder.name || path.basename(workspaceRoot);
@@ -286,10 +288,12 @@ export async function buildFileTree(
     offset,
   };
 
+  onProgress('scan', 0, 1);
   await traverseDirectory(workspaceFolder.uri, workspaceRoot, exclusions, data, null, new Set());
+  onProgress('scan', 1, 1);
 
   logger.log('File tree complete. Parsing dependencies...');
-  const directDeps = await parseDependencies(data, workspaceRoot);
+  const directDeps = await parseDependencies(data, workspaceRoot, onProgress);
   const indirectDeps = computeIndirectDependencies(directDeps);
   const circularDeps = detectCircularDependencies(directDeps);
   const layer3Deps = computeLayer3Dependencies(directDeps);
@@ -310,7 +314,7 @@ export async function buildFileTree(
 
   // Read git data after file tree is built
   logger.log('Reading git data...');
-  data.gitData = await readGitData(workspaceRoot, Object.keys(data.files));
+  data.gitData = await readGitData(workspaceRoot, Object.keys(data.files), onProgress);
 
   return data;
 }

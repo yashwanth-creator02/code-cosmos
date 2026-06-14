@@ -2,10 +2,53 @@
 
 import { sendToExtension, onMessageFromExtension } from './bridge/messageBridge';
 import { Universe } from './universe/Universe';
-import { CosmosData, SettingsState } from '../src/types';
+import { CosmosData, SettingsState, NavigationData } from '../src/types';
 
 let universe: Universe | null = null;
 let pendingSettings: SettingsState | null = null;
+let pendingNavigation: NavigationData | null = null;
+
+// ---------------------------------------------------------------------------
+// Loading screen with live percentage and phase label
+// ---------------------------------------------------------------------------
+
+function updateLoadingScreen(percent: number, phase: string, message: string): void {
+  const overlay = document.getElementById('loading-overlay');
+  const bar = document.getElementById('loading-bar');
+  const pct = document.getElementById('loading-pct');
+  const msg = document.getElementById('loading-text');
+
+  if (!overlay) return;
+
+  // Show the overlay if hidden (e.g. during a rebuild after initial load)
+  if (overlay.style.display === 'none') {
+    overlay.style.display = 'flex';
+    overlay.style.opacity = '0';
+    requestAnimationFrame(() => {
+      overlay.style.transition = 'opacity 0.3s ease';
+      overlay.style.opacity = '1';
+    });
+  }
+
+  if (bar) {
+    bar.style.width = `${percent}%`;
+    // Color shifts with phase: blue for scan/parse, green for git/render
+    if (phase === 'git' || phase === 'render' || phase === 'cache') {
+      bar.style.background = 'linear-gradient(90deg, #00c853, #00e676)';
+    } else {
+      bar.style.background = 'linear-gradient(90deg, var(--accent-blue), #80d8ff)';
+    }
+  }
+
+  if (pct) {
+    pct.textContent = `${percent}%`;
+  }
+
+  if (msg) {
+    msg.textContent = message;
+    msg.style.color = '';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Stale indicator
@@ -63,7 +106,12 @@ function hideStaleIndicator(): void {
 
 onMessageFromExtension((message: any) => {
   switch (message.type) {
-    case 'APPLY_SETTINGS':
+    case 'SCAN_PROGRESS':
+      {
+        const { percent, phase, message } = message.payload;
+        updateLoadingScreen(percent, phase, message);
+        break;
+      }
       if (universe) {
         universe.applySettings(message.payload);
       } else {
@@ -71,9 +119,18 @@ onMessageFromExtension((message: any) => {
       }
       break;
 
+    case 'APPLY_NAVIGATION':
+      if (universe) {
+        universe.applyNavigation(message.payload);
+      } else {
+        pendingNavigation = message.payload;
+      }
+      break;
+
     case 'LOAD_UNIVERSE': {
-      // Fresh data arrived — clear any stale indicator
+      // Fresh data arrived — complete the progress bar then fade out
       hideStaleIndicator();
+      updateLoadingScreen(100, 'render', 'Building cosmos...');
 
       const loadingText = document.getElementById('loading-text');
       if (loadingText) {
@@ -156,6 +213,11 @@ window.addEventListener('DOMContentLoaded', () => {
   if (pendingSettings) {
     universe.applySettings(pendingSettings);
     pendingSettings = null;
+  }
+
+  if (pendingNavigation) {
+    universe.applyNavigation(pendingNavigation);
+    pendingNavigation = null;
   }
 
   sendToExtension({ type: 'READY' });

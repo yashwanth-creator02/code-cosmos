@@ -21,6 +21,11 @@ vsc-extension-quickstart.md
 # node_modules — CRITICAL: must be excluded or package exceeds 50MB Marketplace limit
 node_modules/**
 
+# Per-project Code Cosmos files — should never exist in the extension's own
+# source but excluded defensively in case of accidental local testing artifacts
+.cosmos
+.cosmos.cache
+
 # Build inputs that aren't the final output
 webview/**/*.ts
 vite.config.*

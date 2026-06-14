@@ -6,6 +6,7 @@ import pLimit from 'p-limit';
 import { CosmosData, CosmosDependency, DependencyLayer, DependencyType } from '../types';
 import { logger } from '../utils/logger';
 import { ALL_PARSERS, normalizePath, ParserSettings, ParserContext } from './parsers';
+import { ProgressCallback, noopProgress } from './progress';
 
 interface AliasMap {
   [alias: string]: string;
@@ -203,7 +204,8 @@ export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[]
 
 export async function parseDependencies(
   data: CosmosData,
-  workspaceRootOverride?: string
+  workspaceRootOverride?: string,
+  onProgress: ProgressCallback = noopProgress
 ): Promise<CosmosDependency[]> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceRootOverride && (!workspaceFolders || workspaceFolders.length === 0)) {
@@ -225,6 +227,12 @@ export async function parseDependencies(
   }
 
   const limit = pLimit(10); // Process 10 files at a time
+  const totalFiles = Object.keys(data.files).length;
+  let completedFiles = 0;
+
+  if (totalFiles === 0) {
+    onProgress('parse', 1, 1);
+  }
 
   const tasks = Object.keys(data.files).map((fileId) => {
     return limit(async () => {
@@ -233,6 +241,8 @@ export async function parseDependencies(
       const parser = extensionMap.get(extension);
 
       if (!parser) {
+        completedFiles++;
+        onProgress('parse', completedFiles, totalFiles);
         return [];
       }
 
@@ -251,9 +261,13 @@ export async function parseDependencies(
         if (fileDeps.length > 0) {
           logger.log(`${fileId}: ${fileDeps.length} dependencies found`);
         }
+        completedFiles++;
+        onProgress('parse', completedFiles, totalFiles);
         return fileDeps;
       } catch (err) {
         logger.warn(`Could not parse ${fileId}: ${err}`);
+        completedFiles++;
+        onProgress('parse', completedFiles, totalFiles);
         return [];
       }
     });
