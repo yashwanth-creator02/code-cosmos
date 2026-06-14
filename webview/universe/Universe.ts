@@ -893,7 +893,7 @@ export class Universe {
         icon: '📋',
         label: 'Copy Path',
         action: () => {
-          navigator.clipboard?.writeText(file.relativePath).catch(() => { });
+          navigator.clipboard?.writeText(file.relativePath).catch(() => {});
         },
       },
       {
@@ -2085,8 +2085,8 @@ export class Universe {
       const control =
         sourceStar && targetStar
           ? new THREE.Vector3()
-            .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
-            .multiplyScalar(0.5)
+              .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
+              .multiplyScalar(0.5)
           : mid;
 
       const pos = line.geometry.attributes.position as THREE.BufferAttribute;

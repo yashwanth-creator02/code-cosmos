@@ -296,23 +296,23 @@ export type MessageToWebview =
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
   | { type: 'SCAN_PROGRESS'; payload: ScanProgressPayload }
   | {
-    type: 'COSMOS_STALE';
-    payload: {};
-    // Signals that the file system has changed since the last build.
-    // The webview should show a non-intrusive "refresh available" indicator.
-    // Cleared when LOAD_UNIVERSE is received.
-  };
+      type: 'COSMOS_STALE';
+      payload: {};
+      // Signals that the file system has changed since the last build.
+      // The webview should show a non-intrusive "refresh available" indicator.
+      // Cleared when LOAD_UNIVERSE is received.
+    };
 
 export type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string; line?: number; character?: number } }
   | { type: 'SAVE_SETTINGS'; payload: SettingsState }
   | {
-    type: 'SAVE_NAVIGATION';
-    payload: Partial<NavigationData>;
-    // Partial — the webview sends only the field(s) that changed
-    // (e.g. just namedSlots when a bookmark is added). CosmosPanel merges
-    // this into the existing .cosmos navigation data, preserving the rest.
-  }
+      type: 'SAVE_NAVIGATION';
+      payload: Partial<NavigationData>;
+      // Partial — the webview sends only the field(s) that changed
+      // (e.g. just namedSlots when a bookmark is added). CosmosPanel merges
+      // this into the existing .cosmos navigation data, preserving the rest.
+    }
   | { type: 'REFRESH' }
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };
