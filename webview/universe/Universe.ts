@@ -280,6 +280,7 @@ export class Universe {
     this.initBeaconChip();
     this.initCameraBookmarks();
     this.initMultiSelect();
+    this.initOnscreenEsc();
     this.addBackgroundStars();
     this.animate();
   }
@@ -1386,9 +1387,13 @@ export class Universe {
       if ((e.key === 'r' || e.key === 'R') && !isTyping) {
         this.resetCamera();
       }
-      if (e.key === '?' && !isTyping) {
+      // H key → shortcuts panel (? is reserved for onboarding overlay)
+      if ((e.key === 'h' || e.key === 'H') && !isTyping && !e.ctrlKey) {
         const panel = document.getElementById('shortcuts-panel')!;
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        const btn = document.getElementById('help-button');
+        const isOpen = panel.style.display === 'block';
+        panel.style.display = isOpen ? 'none' : 'block';
+        btn?.classList.toggle('active', !isOpen);
       }
       if ((e.key === 'g' || e.key === 'G') && !isTyping && !e.ctrlKey) {
         // G = Gear = Settings. S was conflicting with spacecraft backward movement.
@@ -1403,7 +1408,17 @@ export class Universe {
         sendToExtension({ type: 'REFRESH' });
       }
     });
+    let selectedResultIndex = -1;
+
+    function highlightResult(idx: number): void {
+      const items = results.querySelectorAll('.search-result') as NodeListOf<HTMLElement>;
+      items.forEach((el, i) => {
+        el.style.background = i === idx ? 'rgba(255,255,255,0.12)' : 'transparent';
+      });
+    }
+
     input.addEventListener('input', () => {
+      selectedResultIndex = -1;
       const query = input.value.trim().toLowerCase();
       if (!query || !this.data) {
         results.style.display = 'none';
@@ -1427,6 +1442,8 @@ export class Universe {
         el.addEventListener('click', () => {
           this.flyToPlanet((el as HTMLElement).dataset.id!);
           container.style.display = 'none';
+          results.style.display = 'none';
+          selectedResultIndex = -1;
         });
         el.addEventListener('mouseenter', () => {
           (el as HTMLElement).style.background = 'rgba(255,255,255,0.08)';
@@ -1436,8 +1453,34 @@ export class Universe {
         });
       });
     });
-  }
 
+    // Arrow key navigation through search results
+    input.addEventListener('keydown', (e) => {
+      const items = results.querySelectorAll('.search-result') as NodeListOf<HTMLElement>;
+      if (!items.length) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedResultIndex = Math.min(selectedResultIndex + 1, items.length - 1);
+        highlightResult(selectedResultIndex);
+        items[selectedResultIndex]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedResultIndex = Math.max(selectedResultIndex - 1, 0);
+        highlightResult(selectedResultIndex);
+        items[selectedResultIndex]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const target = selectedResultIndex >= 0 ? items[selectedResultIndex] : items[0];
+        if (target) {
+          this.flyToPlanet(target.dataset.id!);
+          container.style.display = 'none';
+          results.style.display = 'none';
+          selectedResultIndex = -1;
+        }
+      }
+    });
+  }
   public focusOnFile(fileId: string): void {
     // Track which file is active in the editor — the beacon chip will
     // appear if this planet is off-screen, letting the developer choose
@@ -1872,10 +1915,10 @@ export class Universe {
       if (this.centralCore) {
         this.centralCore.rotation.y += 0.0004;
         this.centralCore.rotation.x += 0.00015;
-        // Breathing pulse on emissive
         const pulse = 0.9 + Math.sin(Date.now() * 0.0008) * 0.3;
         (this.centralCore.material as THREE.MeshStandardMaterial).emissiveIntensity = pulse;
       }
+
       this.orbitalData.forEach((orbital, fileId) => {
         const planet = this.planets.get(fileId);
         if (!planet) {
@@ -1891,10 +1934,43 @@ export class Universe {
           orbital.radius * Math.sin(orbital.inclination) * Math.sin(orbital.angle);
         this.updateInstance(planet.instanceIndex, planet.position, planet.scale, planet.color);
       });
+
       if (this.planetInstanceMesh) {
         this.planetInstanceMesh.instanceMatrix.needsUpdate = true;
       }
+
+      // Dependency lines follow planet positions
       this.updateDependencyLines();
+
+      // Fix: all rings must follow their planet as it orbits.
+      // Previously rings used cached positions and drifted away from moving planets.
+      this.uncommittedRings.forEach((ring, fileId) => {
+        const p = this.planets.get(fileId);
+        if (p) ring.position.copy(p.position);
+      });
+      this.compressionRings.forEach((ring, fileId) => {
+        const p = this.planets.get(fileId);
+        if (p) ring.position.copy(p.position);
+      });
+      this.selectionHighlights.forEach((ring, fileId) => {
+        const p = this.planets.get(fileId);
+        if (p) ring.position.copy(p.position);
+      });
+
+      // Fix: camera tracks the focused planet during orbital motion.
+      // Without this the camera stays fixed while the focused planet orbits away.
+      if (this.focusedFileId && !this.spacecraftMode) {
+        const focused = this.planets.get(this.focusedFileId);
+        if (focused) {
+          // Smoothly keep controls.target on the moving planet
+          this.controls.target.lerp(focused.position, 0.08);
+        }
+      }
+
+      // Fix: path-trace lines follow their endpoint planets during orbital motion
+      if (this.pathTraceLines.length > 0) {
+        this.updatePathTracePositions();
+      }
     }
 
     if (this.settings.enableStarRotation) {
@@ -1921,6 +1997,9 @@ export class Universe {
     // Beacon chip — check every frame whether active file is off-screen
     this.updateBeaconChip();
 
+    // Ring orientation — always face camera. Position is updated in the animation
+    // block above when animation is on; here we update orientation for all rings
+    // so they face correctly even when animation is off.
     const ringPulse = 0.6 + Math.sin(Date.now() * 0.005) * 0.3;
     this.uncommittedRings.forEach((ring, fileId) => {
       const p = this.planets.get(fileId);
@@ -1930,7 +2009,6 @@ export class Universe {
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = ringPulse;
     });
-    // Compression rings pulse slower and subtler — they're informational, not urgent
     const compressPulse = 0.3 + Math.sin(Date.now() * 0.002) * 0.15;
     this.compressionRings.forEach((ring, fileId) => {
       const p = this.planets.get(fileId);
@@ -1940,7 +2018,6 @@ export class Universe {
       ring.quaternion.copy(this.camera.quaternion);
       (ring.material as THREE.MeshBasicMaterial).opacity = compressPulse;
     });
-    // Selection rings: gold, steady pulse, always face camera
     const selectionPulse = 0.7 + Math.sin(Date.now() * 0.004) * 0.2;
     this.selectionHighlights.forEach((ring, fileId) => {
       const p = this.planets.get(fileId);
@@ -1962,7 +2039,6 @@ export class Universe {
       if (!s || !t) {
         return;
       }
-      // Recompute control hint — same logic as drawDependencies
       const sourceFolderId = s.file.folderId;
       const targetFolderId = t.file.folderId;
       let controlHint: THREE.Vector3 | undefined;
@@ -1984,14 +2060,60 @@ export class Universe {
     });
   }
 
+  /**
+   * Redraws path-trace overlay lines as their endpoint planets orbit.
+   * Path trace lines are plain THREE.Line with a position buffer attribute —
+   * we update the same buffer in-place rather than recreating geometries.
+   */
+  private updatePathTracePositions(): void {
+    // Path trace lines store endpoint planet IDs in userData set during drawPathTrace
+    this.pathTraceLines.forEach((line) => {
+      const { fromId, toId } = line.userData as { fromId?: string; toId?: string };
+      if (!fromId || !toId) return;
+      const from = this.planets.get(fromId);
+      const to = this.planets.get(toId);
+      if (!from || !to) return;
+
+      const SEGMENTS = 16;
+      const fromPos = from.position;
+      const toPos = to.position;
+
+      // Recompute control point (same logic as drawPathTrace)
+      const mid = new THREE.Vector3().addVectors(fromPos, toPos).multiplyScalar(0.5);
+      const sourceStar = this.stars.get(from.file.folderId);
+      const targetStar = this.stars.get(to.file.folderId);
+      const control =
+        sourceStar && targetStar
+          ? new THREE.Vector3()
+            .addVectors(sourceStar.mesh.position, targetStar.mesh.position)
+            .multiplyScalar(0.5)
+          : mid;
+
+      const pos = line.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i <= SEGMENTS; i++) {
+        const t = i / SEGMENTS;
+        const u = 1 - t;
+        pos.setXYZ(
+          i,
+          u * u * fromPos.x + 2 * u * t * control.x + t * t * toPos.x,
+          u * u * fromPos.y + 2 * u * t * control.y + t * t * toPos.y,
+          u * u * fromPos.z + 2 * u * t * control.z + t * t * toPos.z
+        );
+      }
+      pos.needsUpdate = true;
+    });
+  }
+
   private initHelpButton(): void {
     const btn = document.getElementById('help-button')!;
     const panel = document.getElementById('shortcuts-panel')!;
     btn.addEventListener('click', () => {
-      const v = panel.style.display === 'block';
-      panel.style.display = v ? 'none' : 'block';
-      btn.classList.toggle('active', !v);
+      const isOpen = panel.style.display === 'block';
+      panel.style.display = isOpen ? 'none' : 'block';
+      btn.classList.toggle('active', !isOpen);
     });
+    // Tooltip updated to reflect H shortcut
+    btn.title = 'Keyboard shortcuts (H)';
   }
 
   // ---------------------------------------------------------------------------
@@ -2181,8 +2303,40 @@ export class Universe {
 
   private initMultiSelect(): void {
     // Selection cleared by the unified Escape handler in initSearch.
-    // Nothing else needed here — togglePlanetSelection and clearSelection
-    // are called directly from onClick and the selection panel clear button.
+    // Multi-select behaviour is handled in onClick (shift-click) and
+    // clearSelection (called from selection panel clear button and Escape).
+
+    const btn = document.getElementById('onscreen-esc-btn');
+    if (!btn) {
+      return;
+    }
+
+    btn.addEventListener('click', () => {
+      // Fire a synthetic Escape keydown so the unified handler in initSearch() runs.
+      // This keeps a single code path for all Escape-like actions rather than
+      // duplicating the priority chain here.
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    btn.addEventListener('mouseenter', () => {
+      btn.style.borderColor = 'rgba(255,255,255,0.3)';
+      btn.style.color = 'rgba(255,255,255,0.75)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.borderColor = 'rgba(255,255,255,0.12)';
+      btn.style.color = 'rgba(255,255,255,0.45)';
+    });
+  }
+
+  private initOnscreenEsc(): void {
+    const btn = document.getElementById('onscreen-esc-btn');
+    if (!btn) {
+      return;
+    }
+
+    // Keep the ESC affordance clickable even if the panel was rebuilt.
+    btn.setAttribute('aria-label', 'Dismiss overlays');
+    btn.setAttribute('title', 'Dismiss overlays');
   }
 
   private togglePlanetSelection(fileId: string): void {
@@ -2393,10 +2547,12 @@ export class Universe {
         color,
         transparent: true,
         opacity: 0.95,
-        linewidth: 2, // note: linewidth > 1 only works in WebGL1 on some platforms
-        depthTest: false, // render on top of everything else
+        linewidth: 2,
+        depthTest: false,
       });
       const line = new THREE.Line(geo, mat);
+      // Tag with endpoint planet IDs so updatePathTracePositions can update them
+      line.userData = { fromId: path[i], toId: path[i + 1] };
       this.pathTraceLines.push(line);
       this.scene.add(line);
     }

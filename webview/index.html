@@ -239,7 +239,7 @@
         align-items: center;
       "
     >
-      <button id="help-button" class="control-btn" title="Keyboard Shortcuts (?)">❔</button>
+      <button id="help-button" class="control-btn" title="Keyboard shortcuts (H)">❔</button>
       <button id="settings-btn" class="control-btn" title="Settings (G)">⚙️</button>
       <button id="filter-btn" class="control-btn" title="File Filter (T)">🏷️</button>
       <button id="minimap-btn" class="control-btn" title="Minimap (M)">🗺️</button>
@@ -319,7 +319,37 @@
         z-index: 100;
         border-color: var(--accent-blue);
       "
-    ></div>
+    >
+      <!-- On-screen Escape button — for touch/trackpad users without physical keyboard.
+         Always visible, positioned bottom-left so it doesn't compete with minimap.
+         Triggers the same unified Escape handler as the keyboard key. -->
+      <div
+        id="onscreen-esc-btn"
+        title="Escape — close panels / exit focus / clear selection"
+        style="
+          position: fixed;
+          bottom: 16px;
+          left: 16px;
+          background: rgba(10, 14, 26, 0.75);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 8px;
+          padding: 5px 12px;
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.45);
+          cursor: pointer;
+          z-index: 200;
+          backdrop-filter: blur(10px);
+          user-select: none;
+          font-family: monospace;
+          letter-spacing: 0.5px;
+          transition:
+            opacity 0.2s ease,
+            border-color 0.2s ease;
+        "
+      >
+        Esc
+      </div>
+    </div>
 
     <!-- Legend -->
     <div

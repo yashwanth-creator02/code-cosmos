@@ -457,10 +457,19 @@ export function activate(context: vscode.ExtensionContext) {
       panelIsVisible = visible;
     });
 
+    // Only rebuild on visibility if the cosmos is stale (file watcher marked it dirty).
+    // Previously this rebuilt on every sidebar focus — even switching tabs in VS Code
+    // triggered a full rescan, causing the "rebuilding itself" behaviour.
+    let isStale = false;
     cosmosPanel.onBecomeVisible(async () => {
       panelIsVisible = true;
-      logger.log('Panel became visible — rebuilding if stale');
-      await loadAndSend();
+      if (isStale) {
+        logger.log('Panel became visible and cosmos is stale — rebuilding');
+        isStale = false;
+        await loadAndSend();
+      } else {
+        logger.log('Panel became visible — cosmos is fresh, no rebuild needed');
+      }
     });
 
     const handleChange = (uri: vscode.Uri) => {
@@ -469,12 +478,14 @@ export function activate(context: vscode.ExtensionContext) {
 
       logger.log(`File changed: ${relativePath}`);
       CosmosPanel.currentPanel?.sendMessage({ type: 'COSMOS_STALE', payload: {} });
+      isStale = true;
 
       if (!panelIsVisible) return;
 
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         logger.log('Auto-rebuilding...');
+        isStale = false;
         await loadAndSend();
       }, REBUILD_DEBOUNCE_MS);
     };
