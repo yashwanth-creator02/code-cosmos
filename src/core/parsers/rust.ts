@@ -8,9 +8,18 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for Rust files to extract module dependencies.
+ */
 export class RustParser implements LanguageParser {
+  /** Supported file extensions for this parser. */
   extensions = ['rs'];
 
+  /**
+   * Parses Rust content to find 'mod' declarations.
+   * @param context The parser context containing file content and settings.
+   * @returns An array of extracted dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

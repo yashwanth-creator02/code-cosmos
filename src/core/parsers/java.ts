@@ -7,9 +7,22 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { getPosition } from './utils';
 
+/**
+ * Parser for Java and Kotlin files that identifies dependencies based on import statements.
+ * Uses a package-to-file index for resolution.
+ */
 export class JavaParser implements LanguageParser {
+  /**
+   * File extensions supported by this parser.
+   */
   extensions = ['java', 'kt', 'kts'];
 
+  /**
+   * Parses Java/Kotlin content to find file dependencies.
+   *
+   * @param context The parser context containing file content and java package index.
+   * @returns An array of discovered dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, javaPackageIndex } = context;
     const deps: CosmosDependency[] = [];
@@ -76,6 +89,15 @@ export class JavaParser implements LanguageParser {
     return deps;
   }
 
+  /**
+   * Resolves a Java/Kotlin import path using the package index.
+   * Handles nested classes by progressively stripping segments from the right.
+   *
+   * @param importPath The fully qualified import path.
+   * @param javaPackageIndex Map of package/class names to file IDs.
+   * @returns The resolved file ID, or null if not found.
+   * @private
+   */
   private resolveJavaImport(
     importPath: string,
     javaPackageIndex: Map<string, string>
@@ -92,6 +114,14 @@ export class JavaParser implements LanguageParser {
     return javaPackageIndex.get(candidate) ?? null;
   }
 
+  /**
+   * Resolves a Java/Kotlin wildcard import (e.g., com.example.*) to all matching files.
+   *
+   * @param importPath The wildcard import path.
+   * @param javaPackageIndex Map of package/class names to file IDs.
+   * @returns Array of resolved file IDs.
+   * @private
+   */
   private resolveJavaWildcardImport(
     importPath: string,
     javaPackageIndex: Map<string, string>

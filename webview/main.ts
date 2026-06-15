@@ -4,14 +4,24 @@ import { sendToExtension, onMessageFromExtension } from './bridge/messageBridge'
 import { Universe } from './universe/Universe';
 import { CosmosData, SettingsState, NavigationData } from '../src/types';
 
+/** The singleton Universe instance managing the 3D scene. */
 let universe: Universe | null = null;
+/** Settings received before the universe was initialized. */
 let pendingSettings: SettingsState | null = null;
+/** Navigation data received before the universe was initialized. */
 let pendingNavigation: NavigationData | null = null;
 
 // ---------------------------------------------------------------------------
 // Loading screen with live percentage and phase label
 // ---------------------------------------------------------------------------
 
+/**
+ * Updates the visual loading overlay with current progress and status.
+ *
+ * @param percent - Completion percentage (0-100).
+ * @param phase - Current processing phase (affects bar color).
+ * @param message - Status message to display.
+ */
 function updateLoadingScreen(percent: number, phase: string, message: string): void {
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
@@ -56,6 +66,9 @@ function updateLoadingScreen(percent: number, phase: string, message: string): v
 // Cleared when a fresh LOAD_UNIVERSE arrives.
 // ---------------------------------------------------------------------------
 
+/**
+ * Shows the "stale data" indicator when filesystem changes are detected.
+ */
 function showStaleIndicator(): void {
   let indicator = document.getElementById('stale-indicator');
   if (!indicator) {
@@ -90,6 +103,9 @@ function showStaleIndicator(): void {
   indicator.style.display = 'block';
 }
 
+/**
+ * Hides the "stale data" indicator.
+ */
 function hideStaleIndicator(): void {
   const indicator = document.getElementById('stale-indicator');
   if (indicator) {
@@ -104,14 +120,17 @@ function hideStaleIndicator(): void {
 // Message handler
 // ---------------------------------------------------------------------------
 
+/**
+ * Main message loop receiving commands from the VS Code extension.
+ */
 onMessageFromExtension((message: any) => {
   switch (message.type) {
-    case 'SCAN_PROGRESS':
-      {
-        const { percent, phase, message } = message.payload;
-        updateLoadingScreen(percent, phase, message);
-        break;
-      }
+    case 'SCAN_PROGRESS': {
+      const { percent, phase, message: msg } = message.payload;
+      updateLoadingScreen(percent, phase, msg);
+      break;
+    }
+    case 'APPLY_SETTINGS':
       if (universe) {
         universe.applySettings(message.payload);
       } else {

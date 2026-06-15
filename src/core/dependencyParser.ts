@@ -8,14 +8,29 @@ import { logger } from '../utils/logger';
 import { ALL_PARSERS, normalizePath, ParserSettings, ParserContext } from './parsers';
 import { ProgressCallback, noopProgress } from './progress';
 
+/**
+ * A map of path aliases to their replacement strings.
+ */
 interface AliasMap {
   [alias: string]: string;
 }
 
+/**
+ * Strips single-line and multi-line comments from JSON content.
+ *
+ * @param content - The JSON string content.
+ * @returns The JSON content without comments.
+ */
 function stripJsonComments(content: string): string {
   return content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
+/**
+ * Parses JSON content while safely handling comments.
+ *
+ * @param content - The raw string content.
+ * @returns The parsed object, or null if parsing fails.
+ */
 function parseJsonConfig(content: string): any | null {
   try {
     return JSON.parse(stripJsonComments(content));
@@ -24,6 +39,12 @@ function parseJsonConfig(content: string): any | null {
   }
 }
 
+/**
+ * Extracts path aliases from a compilerOptions.paths-style object.
+ *
+ * @param paths - The paths configuration object.
+ * @returns A normalized AliasMap.
+ */
 function extractAliasesFromPaths(paths: Record<string, unknown>): AliasMap {
   const aliases: AliasMap = {};
 
@@ -37,11 +58,25 @@ function extractAliasesFromPaths(paths: Record<string, unknown>): AliasMap {
   return aliases;
 }
 
+/**
+ * Converts a path to be relative to the workspace root.
+ *
+ * @param basePath - The path to convert.
+ * @param workspaceRoot - The absolute path of the workspace root.
+ * @returns The workspace-relative normalized path.
+ */
 function toWorkspaceRelative(basePath: string, workspaceRoot: string): string {
   const absolute = path.isAbsolute(basePath) ? basePath : path.join(workspaceRoot, basePath);
   return normalizePath(path.relative(workspaceRoot, absolute) || '.');
 }
 
+/**
+ * Reads settings (aliases, baseUrl) from a TypeScript or JavaScript config file.
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @param fileName - The config file name to read.
+ * @returns A promise resolving to ParserSettings.
+ */
 async function readConfigSettings(
   workspaceRoot: string,
   fileName: 'tsconfig.json' | 'jsconfig.json'
@@ -68,6 +103,12 @@ async function readConfigSettings(
   }
 }
 
+/**
+ * Reads module aliases from package.json (e.g., _moduleAliases or imports).
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @returns A promise resolving to an AliasMap.
+ */
 async function readPackageAliases(workspaceRoot: string): Promise<AliasMap> {
   try {
     const packageUri = vscode.Uri.file(path.join(workspaceRoot, 'package.json'));
@@ -103,6 +144,12 @@ async function readPackageAliases(workspaceRoot: string): Promise<AliasMap> {
   }
 }
 
+/**
+ * Attempts to extract aliases from common Vite configuration file names.
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @returns A promise resolving to an AliasMap.
+ */
 async function readViteAliases(workspaceRoot: string): Promise<AliasMap> {
   const aliases: AliasMap = {};
   const configNames = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs'];
@@ -127,6 +174,12 @@ async function readViteAliases(workspaceRoot: string): Promise<AliasMap> {
   return aliases;
 }
 
+/**
+ * Loads and merges all resolution settings from workspace configuration files.
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @returns A promise resolving to the combined ParserSettings.
+ */
 async function loadResolutionSettings(workspaceRoot: string): Promise<ParserSettings> {
   const tsConfig = await readConfigSettings(workspaceRoot, 'tsconfig.json');
   const jsConfig = await readConfigSettings(workspaceRoot, 'jsconfig.json');
@@ -144,11 +197,23 @@ async function loadResolutionSettings(workspaceRoot: string): Promise<ParserSett
   };
 }
 
+/**
+ * Reads the content of a file as a string.
+ *
+ * @param filePath - The absolute path to the file.
+ * @returns A promise resolving to the file content string.
+ */
 async function readFileContent(filePath: string): Promise<string> {
   const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
   return Buffer.from(raw).toString('utf8');
 }
 
+/**
+ * Builds a map of normalized file paths to their original file IDs.
+ *
+ * @param data - The CosmosData containing the files.
+ * @returns A record mapping normalized paths to file IDs.
+ */
 function buildNormalizedFileMap(data: CosmosData): Record<string, string> {
   const normalizedFileIds: Record<string, string> = {};
   for (const fileId of Object.keys(data.files)) {
@@ -157,6 +222,12 @@ function buildNormalizedFileMap(data: CosmosData): Record<string, string> {
   return normalizedFileIds;
 }
 
+/**
+ * Builds an index of Java package names to file IDs.
+ *
+ * @param data - The CosmosData containing the files.
+ * @returns A map of Java package names to file IDs.
+ */
 function buildJavaPackageIndex(data: CosmosData): Map<string, string> {
   const index = new Map<string, string>();
   const rootMarkers = ['src/main/java/', 'src/test/java/', 'src/integrationTest/java/', 'src/'];
@@ -186,6 +257,12 @@ function buildJavaPackageIndex(data: CosmosData): Map<string, string> {
   return index;
 }
 
+/**
+ * Removes duplicate dependencies from an array.
+ *
+ * @param deps - Array of dependencies to deduplicate.
+ * @returns A new array containing only unique dependencies.
+ */
 export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[] {
   const seen = new Set<string>();
   const unique: CosmosDependency[] = [];
@@ -202,6 +279,16 @@ export function dedupeDependencies(deps: CosmosDependency[]): CosmosDependency[]
   return unique;
 }
 
+/**
+ * Parses all files in the cosmos to identify direct dependencies.
+ *
+ * Uses a pool of language-specific parsers to scan file content and resolve imports.
+ *
+ * @param data - The CosmosData to populate with dependencies.
+ * @param workspaceRootOverride - Optional override for the workspace root path.
+ * @param onProgress - Optional callback to report parsing progress.
+ * @returns A promise resolving to an array of identified direct dependencies.
+ */
 export async function parseDependencies(
   data: CosmosData,
   workspaceRootOverride?: string,
@@ -281,11 +368,25 @@ export async function parseDependencies(
   return deduped;
 }
 
+/**
+ * Loads path aliases from all supported configuration files in a workspace.
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @returns A promise resolving to an AliasMap.
+ */
 export async function loadAliases(workspaceRoot: string): Promise<AliasMap> {
   const settings = await loadResolutionSettings(workspaceRoot);
   return settings.aliases;
 }
 
+/**
+ * Computes indirect (transitive) dependencies based on direct connections.
+ *
+ * If A -> B and B -> C, then an indirect dependency A -> C is created.
+ *
+ * @param directDeps - Array of direct dependencies.
+ * @returns Array of identified indirect dependencies.
+ */
 export function computeIndirectDependencies(directDeps: CosmosDependency[]): CosmosDependency[] {
   const indirectDeps: CosmosDependency[] = [];
   const directMap = new Map<string, Set<string>>();
@@ -322,6 +423,12 @@ export function computeIndirectDependencies(directDeps: CosmosDependency[]): Cos
   return dedupeDependencies(indirectDeps);
 }
 
+/**
+ * Detects circular dependency chains in the direct dependency graph.
+ *
+ * @param directDeps - Array of direct dependencies.
+ * @returns Array of dependencies that form part of a circular chain.
+ */
 export function detectCircularDependencies(directDeps: CosmosDependency[]): CosmosDependency[] {
   const graph = new Map<string, Set<string>>();
   for (const dep of directDeps) {
@@ -385,10 +492,23 @@ export function detectCircularDependencies(directDeps: CosmosDependency[]): Cosm
   return dedupeDependencies(circularDeps);
 }
 
+/**
+ * Generates a unique key for a pair of file IDs, regardless of order.
+ *
+ * @param a - The first file ID.
+ * @param b - The second file ID.
+ * @returns A deterministic string key for the pair.
+ */
 function pairKey(a: string, b: string): string {
   return [a, b].sort().join('↔');
 }
 
+/**
+ * Computes Layer 3 connections: files that share a common dependent or common dependency.
+ *
+ * @param directDeps - Array of direct dependencies.
+ * @returns Array of Layer 3 dependencies.
+ */
 export function computeLayer3Dependencies(directDeps: CosmosDependency[]): CosmosDependency[] {
   const layer3: CosmosDependency[] = [];
   const MAX_LAYER3 = 500;

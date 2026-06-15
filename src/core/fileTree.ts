@@ -16,6 +16,12 @@ import {
 import { readGitData } from './gitReader';
 import { ProgressCallback, noopProgress } from './progress';
 
+/**
+ * Maps a file extension to its corresponding FileType.
+ *
+ * @param extension - The file extension to map.
+ * @returns The categorized FileType.
+ */
 function getFileType(extension: string): FileType {
   switch (extension.toLowerCase()) {
     case 'ts':
@@ -77,10 +83,27 @@ function getFileType(extension: string): FileType {
   }
 }
 
+/**
+ * Normalizes a path by replacing backslashes with forward slashes.
+ *
+ * @param p - The path string to normalize.
+ * @returns The normalized path with forward slashes.
+ */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/**
+ * Recursively traverses a directory to build the file and folder maps.
+ *
+ * @param dirUri - The URI of the directory to traverse.
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @param exclusions - Array of glob patterns to exclude.
+ * @param data - The CosmosData object to populate.
+ * @param parentFolderId - The ID of the parent folder.
+ * @param visitedPaths - Set of already visited absolute paths to prevent symlink loops.
+ * @returns A promise that resolves when traversal is complete.
+ */
 async function traverseDirectory(
   dirUri: vscode.Uri,
   workspaceRoot: string,
@@ -177,7 +200,12 @@ async function traverseDirectory(
   await Promise.all(tasks);
 }
 
-// Calculates orbital radius based on depth
+/**
+ * Calculates the orbital radius for a given depth in the star tree.
+ *
+ * @param depth - The depth level (0 for root).
+ * @returns The calculated orbital radius.
+ */
 function getRadiusForDepth(depth: number): number {
   // Base radius at depth 1 — distance from central sun to top level folders
   const BASE_RADIUS = 350;
@@ -189,6 +217,15 @@ function getRadiusForDepth(depth: number): number {
   return Math.max(MIN_RADIUS, BASE_RADIUS * Math.pow(FALLOFF, depth - 1));
 }
 
+/**
+ * Calculates a 3D position offset using the golden angle for spherical distribution.
+ *
+ * @param index - The index of the child.
+ * @param total - The total number of children.
+ * @param radius - The radius of the shell.
+ * @param parentPosition - The 3D position of the parent node.
+ * @returns The calculated 3D position.
+ */
 function goldenAngleOffset(
   index: number,
   total: number,
@@ -213,6 +250,13 @@ function goldenAngleOffset(
   };
 }
 
+/**
+ * Recursively counts all files in a folder and its subfolders.
+ *
+ * @param folderId - The ID of the folder to count.
+ * @param folders - The map of all folders.
+ * @returns The total number of files in the subtree.
+ */
 function countSubtreeFiles(folderId: string, folders: Record<string, CosmosFolder>): number {
   const folder = folders[folderId];
   if (!folder) {
@@ -227,6 +271,18 @@ function countSubtreeFiles(folderId: string, folders: Record<string, CosmosFolde
 
   return directFiles + childFiles;
 }
+
+/**
+ * Recursively builds a star tree for spatial layout of folders.
+ *
+ * @param folderId - The ID of the folder to start from.
+ * @param folders - The map of all folders.
+ * @param parentPosition - The 3D position of the parent node.
+ * @param depth - The current depth in the hierarchy.
+ * @param childIndex - The index of this folder among its siblings.
+ * @param totalChildren - The total number of siblings.
+ * @returns The root node of the constructed star tree.
+ */
 export function buildStarTree(
   folderId: string,
   folders: Record<string, CosmosFolder>,
@@ -256,6 +312,16 @@ export function buildStarTree(
   return { folderId, position, depth, childNodes, subtreeFileCount };
 }
 
+/**
+ * Builds the complete file tree and dependency graph for a workspace.
+ *
+ * Performs directory traversal, dependency parsing, and git data retrieval.
+ *
+ * @param workspaceFolder - The VS Code workspace folder to scan.
+ * @param offset - Optional 3D offset for the entire workspace.
+ * @param onProgress - Optional callback to report build progress.
+ * @returns A promise resolving to the complete CosmosData object.
+ */
 export async function buildFileTree(
   workspaceFolder: vscode.WorkspaceFolder,
   offset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 },

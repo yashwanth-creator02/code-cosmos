@@ -8,9 +8,21 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for Go source files.
+ * Extracts relative import dependencies.
+ */
 export class GoParser implements LanguageParser {
+  /**
+   * The list of file extensions supported by this parser.
+   */
   extensions = ['go'];
 
+  /**
+   * Parses the content of a Go file to find its relative import dependencies.
+   * @param context The parser context containing file content and metadata.
+   * @returns An array of detected dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

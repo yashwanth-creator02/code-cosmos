@@ -3,13 +3,34 @@
 import * as THREE from 'three';
 import { CosmosFolder } from '../../src/types/index';
 
+/**
+ * Represents a star in the 3D universe, which serves as a visual hub for a folder.
+ * Stars vary in size and color based on the number of files they contain.
+ */
 export class Star {
+  /** The main mesh representing the star's surface. */
   public mesh: THREE.Mesh;
+
+  /** The 3D position of the star in the scene. */
   public position: THREE.Vector3;
+
+  /** The folder data associated with this star. */
   public folder: CosmosFolder;
+
+  /** The point light emitted by the star. */
   public light: THREE.PointLight;
+
+  /** An additional mesh used to create a glow halo effect around the star. */
   public glowMesh: THREE.Mesh; // inner glow halo
 
+  /**
+   * Creates a new Star instance.
+   *
+   * @param folder The folder data this star represents.
+   * @param position The 3D position of the star.
+   * @param subtreeFileCount The total number of files in this folder's subtree, used for sizing and coloring.
+   * @param performanceMode If true, reduces the geometric complexity of the star.
+   */
   constructor(
     folder: CosmosFolder,
     position: THREE.Vector3,

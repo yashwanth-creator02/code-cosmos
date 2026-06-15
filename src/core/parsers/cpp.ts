@@ -8,9 +8,21 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for C and C++ source and header files.
+ * Extracts include dependencies using regular expressions.
+ */
 export class CCppParser implements LanguageParser {
+  /**
+   * The list of file extensions supported by this parser.
+   */
   extensions = ['c', 'cpp', 'cc', 'cxx', 'h', 'hpp'];
 
+  /**
+   * Parses the content of a C/C++ file to find its include dependencies.
+   * @param context The parser context containing file content and metadata.
+   * @returns An array of detected dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

@@ -3,6 +3,9 @@ import { DependencyResolutionKind, DependencyReferenceKind, DependencyType } fro
 import { ParserSettings, createDirectDependency } from './types';
 import { logger } from '../../utils/logger';
 
+/**
+ * List of file extensions that are considered for dependency analysis.
+ */
 export const DEPENDENCY_EXTENSIONS = [
   '.ts',
   '.tsx',
@@ -32,6 +35,11 @@ export const DEPENDENCY_EXTENSIONS = [
   '.eot',
 ];
 
+/**
+ * Normalizes a file path by standardizing separators and removing relative prefixes.
+ * @param value The path to normalize.
+ * @returns The normalized path.
+ */
 export function normalizePath(value: string): string {
   return value
     .replace(/\\/g, '/')
@@ -41,6 +49,11 @@ export function normalizePath(value: string): string {
     .replace(/\/$/, '');
 }
 
+/**
+ * Removes query parameters and hash fragments from a specifier.
+ * @param value The specifier to strip.
+ * @returns The stripped specifier.
+ */
 export function stripSpecifierDecoration(value: string): string {
   const trimmed = value.trim();
   const queryIndex = trimmed.indexOf('?');
@@ -54,6 +67,11 @@ export function stripSpecifierDecoration(value: string): string {
   return trimmed.slice(0, Math.min(...cutPoints));
 }
 
+/**
+ * Checks if a specifier refers to an external resource (e.g., URL or absolute path).
+ * @param value The specifier to check.
+ * @returns True if the specifier is external.
+ */
 export function isExternalSpecifier(value: string): boolean {
   const specifier = value.trim().toLowerCase();
   if (!specifier || specifier.startsWith('//')) {
@@ -63,6 +81,11 @@ export function isExternalSpecifier(value: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/.test(specifier) && !/^[a-z]:[\\/]/i.test(specifier);
 }
 
+/**
+ * Strips the extension from a file path if it matches a known dependency extension.
+ * @param candidate The file path to strip.
+ * @returns The file path without its extension.
+ */
 export function stripExtension(candidate: string): string {
   const normalized = normalizePath(candidate);
   const knownExtension = [...DEPENDENCY_EXTENSIONS]
@@ -76,6 +99,12 @@ export function stripExtension(candidate: string): string {
   return normalized.replace(/\.[^/.]+$/, '');
 }
 
+/**
+ * Attempts to resolve a candidate path by checking for exact matches or common extensions.
+ * @param candidate The candidate path to resolve.
+ * @param normalizedFileIds Map of normalized paths to file IDs.
+ * @returns The resolved file ID, or null if not found.
+ */
 export function tryResolveCandidate(
   candidate: string,
   normalizedFileIds: Record<string, string>
@@ -103,6 +132,12 @@ export function tryResolveCandidate(
   return null;
 }
 
+/**
+ * Attempts to resolve a decorated candidate path (with query/hash or potential extension mismatch).
+ * @param candidate The candidate path to resolve.
+ * @param normalizedFileIds Map of normalized paths to file IDs.
+ * @returns The resolved file ID, or null if not found.
+ */
 export function tryResolveDecoratedCandidate(
   candidate: string,
   normalizedFileIds: Record<string, string>
@@ -121,6 +156,12 @@ export function tryResolveDecoratedCandidate(
   return null;
 }
 
+/**
+ * Calculates the line and character position for a given index in a string.
+ * @param content The string content.
+ * @param index The character index.
+ * @returns An object with 1-based line and character numbers.
+ */
 export function getPosition(content: string, index: number): { line: number; character: number } {
   const lines = content.slice(0, index).split('\n');
   return {
@@ -129,6 +170,12 @@ export function getPosition(content: string, index: number): { line: number; cha
   };
 }
 
+/**
+ * Resolves the "rest" part of an import when matched against an alias.
+ * @param normalizedImport The normalized import specifier.
+ * @param normalizedAlias The normalized alias pattern.
+ * @returns The remaining part of the path, or null if no match.
+ */
 export function resolveAliasRest(normalizedImport: string, normalizedAlias: string): string | null {
   const starIndex = normalizedAlias.indexOf('*');
   if (starIndex >= 0) {
@@ -155,6 +202,12 @@ export function resolveAliasRest(normalizedImport: string, normalizedAlias: stri
   return null;
 }
 
+/**
+ * Applies the target path of an alias to the "rest" part of the import.
+ * @param normalizedTarget The normalized alias target path.
+ * @param rest The "rest" part of the import path.
+ * @returns The resolved path.
+ */
 export function applyAliasTarget(normalizedTarget: string, rest: string): string {
   if (normalizedTarget.includes('*')) {
     return normalizePath(normalizedTarget.replace('*', rest));
@@ -163,11 +216,25 @@ export function applyAliasTarget(normalizedTarget: string, rest: string): string
   return rest ? normalizePath(`${normalizedTarget}/${rest}`) : normalizedTarget;
 }
 
+/**
+ * Represents a successfully resolved import.
+ */
 export interface ResolvedImport {
+  /** The unique ID of the resolved target file. */
   targetId: string;
+  /** The method used to resolve the import. */
   resolvedBy: DependencyResolutionKind;
 }
 
+/**
+ * Resolves an import path to a file ID using project settings and file index.
+ * @param importPath The import specifier.
+ * @param sourceFile The file containing the import.
+ * @param settings The parser settings (aliases, baseUrl).
+ * @param normalizedFileIds Map of normalized paths to file IDs.
+ * @param allowWorkspaceRoot Whether to allow resolution relative to the workspace root.
+ * @returns The resolved import info, or null if resolution failed.
+ */
 export function resolveImport(
   importPath: string,
   sourceFile: string,

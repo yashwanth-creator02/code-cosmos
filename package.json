@@ -86,11 +86,11 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile && npm run build:webview",
-    "start": "npm run compile && npm run build:webview && npm run format",
+    "start": "npm run compile && npm run build:webview && npm run format && npm run lint",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src",
+    "lint": "eslint src ",
     "test": "vscode-test",
     "build:webview": "vite build",
     "watch:webview": "vite build --watch",

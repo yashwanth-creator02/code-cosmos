@@ -42,5 +42,11 @@ tests/**
 .github/**
 *.sh
 
-# Docs that don't need to ship (README and CHANGELOG do ship — don't exclude them)
+# Docs that don't need to ship with the installed extension
+# (README and CHANGELOG do ship — Marketplace shows them)
 CONTRIBUTING.md
+SECURITY.md
+.github/**
+
+notes.txt
+assets/demo/**

@@ -7,9 +7,21 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { resolveImport, isExternalSpecifier, getPosition } from './utils';
 
+/**
+ * Parser for CSS, SCSS, and SASS files.
+ * Extracts @import and url() dependencies.
+ */
 export class CssParser implements LanguageParser {
+  /**
+   * The list of file extensions supported by this parser.
+   */
   extensions = ['css', 'scss', 'sass'];
 
+  /**
+   * Parses the content of a CSS file to find its import and asset dependencies.
+   * @param context The parser context containing file content and metadata.
+   * @returns An array of detected dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, settings, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

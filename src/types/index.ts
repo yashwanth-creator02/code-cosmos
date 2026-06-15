@@ -1,318 +1,408 @@
 // src/types/index.ts
 
-// ---------------------------------------------------------------------------
-// File type enum
-// ---------------------------------------------------------------------------
-
+/**
+ * Supported file types in Code Cosmos.
+ */
 export enum FileType {
+  /** TypeScript file */
   TS = 'ts',
+  /** JavaScript file */
   JS = 'js',
+  /** HTML file */
   HTML = 'html',
+  /** CSS file */
   CSS = 'css',
+  /** Python file */
   PY = 'py',
+  /** Java file */
   JAVA = 'java',
+  /** Image or other asset file */
   ASSET = 'asset',
+  /** Fallback for unknown file types */
   OTHER = 'other',
+  /** Rust file */
   RUST = 'rs',
+  /** Go file */
   GO = 'go',
+  /** C++ file */
   CPP = 'cpp',
+  /** Ruby file */
   RUBY = 'rb',
+  /** PHP file */
   PHP = 'php',
+  /** Swift file */
   SWIFT = 'swift',
+  /** Kotlin file */
   KOTLIN = 'kt',
+  /** Vue file */
   VUE = 'vue',
+  /** Svelte file */
   SVELTE = 'svelte',
 }
 
-// ---------------------------------------------------------------------------
-// Dependency enums
-// ---------------------------------------------------------------------------
-
+/**
+ * Layers of the dependency graph for visual distinction.
+ */
 export enum DependencyLayer {
+  /** Direct import from source to target */
   DIRECT = 'direct',
+  /** Indirect dependency (A -> B -> C) */
   INDIRECT = 'indirect',
+  /** Circular dependency chain */
   CIRCULAR = 'circular',
+  /** Shared dependent (Layer 3) */
   LAYER3_SHARED_DEPENDENT = 'layer3_shared_dependent',
+  /** Shared dependency (Layer 3) */
   LAYER3_SHARED_DEPENDENCY = 'layer3_shared_dependency',
 }
 
+/**
+ * Basic types of dependencies.
+ */
 export enum DependencyType {
+  /** Standard import/require */
   IMPORT = 'import',
+  /** Type reference or similar */
   REFERENCE = 'reference',
+  /** Generic link */
   LINK = 'link',
 }
 
+/**
+ * Methods used to resolve a dependency path.
+ */
 export enum DependencyResolutionKind {
+  /** Relative path resolution */
   RELATIVE = 'relative',
+  /** Path alias resolution (e.g., from tsconfig) */
   ALIAS = 'alias',
+  /** Base URL-based resolution */
   BASE_URL = 'base_url',
+  /** Root-relative resolution */
   ROOT_RELATIVE = 'root_relative',
+  /** Workspace-relative resolution */
   WORKSPACE = 'workspace',
+  /** Java package name resolution */
   JAVA_PACKAGE = 'java_package',
 }
 
+/**
+ * Specific syntax or mechanism used to reference a dependency.
+ */
 export enum DependencyReferenceKind {
+  /** Static ES module import */
   STATIC_IMPORT = 'static_import',
+  /** Re-export (export ... from) */
   RE_EXPORT = 're_export',
+  /** CommonJS require() */
   COMMONJS_REQUIRE = 'commonjs_require',
+  /** Dynamic import() */
   DYNAMIC_IMPORT = 'dynamic_import',
+  /** import.meta.url reference */
   IMPORT_META_URL = 'import_meta_url',
+  /** Test mock reference */
   TEST_MOCK = 'test_mock',
+  /** TypeScript triple-slash reference */
   TRIPLE_SLASH = 'triple_slash',
+  /** HTML attribute reference (e.g., <script src="...">) */
   HTML_ATTRIBUTE = 'html_attribute',
+  /** HTML srcset attribute */
   HTML_SRCSET = 'html_srcset',
+  /** CSS @import rule */
   CSS_IMPORT = 'css_import',
+  /** CSS url() function */
   CSS_URL = 'css_url',
+  /** Python import statement */
   PYTHON_IMPORT = 'python_import',
+  /** Java import statement */
   JAVA_IMPORT = 'java_import',
 }
 
-// ---------------------------------------------------------------------------
-// Core data types
-// ---------------------------------------------------------------------------
-
+/**
+ * Represents a file in the cosmos.
+ */
 export interface CosmosFile {
+  /** Unique identifier (usually relative path) */
   id: string;
+  /** Display name of the file */
   name: string;
+  /** Absolute filesystem path */
   path: string;
+  /** Path relative to the workspace root */
   relativePath: string;
+  /** File extension without dot */
   extension: string;
+  /** Categorized file type */
   type: FileType;
-  size: number; // bytes from vscode.FileStat — used for planet size encoding
+  /** Size in bytes */
+  size: number;
+  /** ID of the folder containing this file */
   folderId: string;
 }
 
+/**
+ * Represents a folder in the cosmos.
+ */
 export interface CosmosFolder {
+  /** Unique identifier (usually relative path) */
   id: string;
+  /** Display name of the folder */
   name: string;
+  /** Absolute filesystem path */
   path: string;
+  /** Path relative to the workspace root */
   relativePath: string;
+  /** ID of the parent folder, or null for root */
   parentId: string | null;
+  /** List of file IDs in this folder */
   fileIds: string[];
+  /** List of subfolder IDs */
   childFolderIds: string[];
+  /** Optional 3D offset for spatial layout */
   offset?: { x: number; y: number; z: number };
 }
 
+/**
+ * Represents a dependency between two files.
+ */
 export interface CosmosDependency {
+  /** ID of the source file */
   sourceId: string;
+  /** ID of the target file */
   targetId: string;
+  /** Visual layer this dependency belongs to */
   layer: DependencyLayer;
+  /** Type of dependency */
   type: DependencyType;
+  /** Original import specifier string */
   specifier?: string;
+  /** Resolution mechanism used */
   resolvedBy?: DependencyResolutionKind;
+  /** Syntax used for the reference */
   referenceKind?: DependencyReferenceKind;
+  /** Line number in source file (1-based) */
   line?: number;
+  /** Character position in source file (1-based) */
   character?: number;
 }
 
+/**
+ * Node in the star tree hierarchy used for spatial layout.
+ */
 export interface StarNode {
+  /** ID of the folder this star represents */
   folderId: string;
+  /** 3D position in the cosmos */
   position: { x: number; y: number; z: number };
+  /** Depth in the folder hierarchy */
   depth: number;
+  /** Child nodes in the tree */
   childNodes: StarNode[];
+  /** Total number of files in this subtree */
   subtreeFileCount: number;
 }
 
-// ---------------------------------------------------------------------------
-// Git data
-// ---------------------------------------------------------------------------
-
+/**
+ * Git metadata for a single file.
+ */
 export interface GitFileInfo {
+  /** Number of commits involving this file */
   commitCount: number;
+  /** Days elapsed since the last commit to this file */
   daysSinceLastChange: number;
+  /** Whether the file has uncommitted changes */
   hasUncommittedChanges: boolean;
-  heat: number; // 0–1 normalised score: 0.7 * frequency + 0.3 * recency
+  /** Normalized heat score (0-1) based on churn and recency */
+  heat: number;
 }
 
+/**
+ * Overall git data for a workspace.
+ */
 export interface GitData {
+  /** Current active branch name */
   branch: string;
+  /** Map of file ID to git metadata */
   fileInfo: Record<string, GitFileInfo>;
+  /** Whether git data is available for this workspace */
   available: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Metrics — separate from CosmosFile so the core file map stays lightweight.
-// Future diagnostic data (test coverage, TODO count, complexity) lands here,
-// not in CosmosFile. The webview merges metrics into planet visuals at render time.
-// ---------------------------------------------------------------------------
-
+/**
+ * Performance and health metrics for a file.
+ */
 export interface CosmosFileMetrics {
+  /** ID of the file */
   fileId: string;
-  // Git metrics — populated from GitData when available
-  heat?: number; // 0–1 churn score
+  /** Heat score (churn) */
+  heat?: number;
+  /** Total commit count */
   commitCount?: number;
+  /** Days since last modification */
   daysSinceLastChange?: number;
+  /** Whether uncommitted changes exist */
   hasUncommittedChanges?: boolean;
-  // Future metric slots — add here when implementing, never in CosmosFile
-  // testCoverage?: number;   // 0–1 percentage
-  // todoCount?: number;
-  // bugCount?: number;
-  // cyclomaticComplexity?: number;
-  // linesOfCode?: number;  // Note: CosmosFile.size is bytes, not LOC — LOC goes here
 }
-
-// ---------------------------------------------------------------------------
-// Root data payload
-// ---------------------------------------------------------------------------
-
-export interface CosmosData {
-  files: Record<string, CosmosFile>;
-  folders: Record<string, CosmosFolder>;
-  dependencies: CosmosDependency[];
-  rootFolderId: string;
-  workspaceRoots: Record<string, string>;
-  starTree: StarNode | null;
-  gitData: GitData | null;
-  // Future: metrics will be sent as a separate optional payload or merged here
-  // metrics?: Record<string, CosmosFileMetrics>;
-}
-
-// ---------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------
 
 /**
- * Structured settings — organised into logical tiers matching the toggle system.
- *
- * Tier 1 (structural): always on, cannot be meaningfully disabled
- * Tier 2 (data overlays): diagnostic information, on by default
- * Tier 3 (animations): expensive live effects, off by default
- *
- * Adding new settings: place in the correct tier section with a comment.
- * Never add a flat boolean directly — always add to the appropriate group.
+ * Complete data payload sent to the webview.
  */
-export interface SettingsState {
-  // --- Tier 2: Dependency overlay toggles ---
-  showDirectLines: boolean;
-  showIndirectLines: boolean;
-  showLayer3Lines: boolean;
-  showCircularLines: boolean;
-
-  // --- Tier 3: Animation toggles ---
-  enableAnimation: boolean; // planet orbital animation
-  enableStarRotation: boolean; // star axial rotation
-
-  // --- Tier 2: Data overlay toggles ---
-  showFolderLabels: boolean;
-  showProximityLabels: boolean;
-  showGitHeatmap: boolean;
-  showMinimap: boolean;
-  showLegend: boolean;
-
-  // --- Tier 1: Rendering options (structural, but user-adjustable) ---
-  showBackgroundStars: boolean;
-  enableFog: boolean;
-
-  // --- Performance ---
-  performanceMode: boolean;
-
-  // --- Misc ---
-  orbitalSpeed: number; // multiplier, applies when enableAnimation is true
-  spacingFactor: number; // multiplies all star/planet distances from origin —
-  // higher = more spread out, less clumped
-  // (analogous to Obsidian's "repel force" slider)
+export interface CosmosData {
+  /** Map of file ID to file data */
+  files: Record<string, CosmosFile>;
+  /** Map of folder ID to folder data */
+  folders: Record<string, CosmosFolder>;
+  /** List of all dependencies */
+  dependencies: CosmosDependency[];
+  /** ID of the root folder */
+  rootFolderId: string;
+  /** Map of workspace names to absolute paths */
+  workspaceRoots: Record<string, string>;
+  /** Root of the star tree for 3D layout */
+  starTree: StarNode | null;
+  /** Git metadata for the workspace */
+  gitData: GitData | null;
 }
 
+/**
+ * State of the webview settings and preferences.
+ */
+export interface SettingsState {
+  /** Show direct dependency lines */
+  showDirectLines: boolean;
+  /** Show indirect dependency lines */
+  showIndirectLines: boolean;
+  /** Show Layer 3 (shared dependency) lines */
+  showLayer3Lines: boolean;
+  /** Show circular dependency lines */
+  showCircularLines: boolean;
+
+  /** Enable planet orbital animation */
+  enableAnimation: boolean;
+  /** Enable star axial rotation animation */
+  enableStarRotation: boolean;
+
+  /** Show labels for folders (stars) */
+  showFolderLabels: boolean;
+  /** Show labels for planets on proximity */
+  showProximityLabels: boolean;
+  /** Use git heat score for planet coloring */
+  showGitHeatmap: boolean;
+  /** Show the 2D minimap overlay */
+  showMinimap: boolean;
+  /** Show the visual legend */
+  showLegend: boolean;
+
+  /** Show background starfield */
+  showBackgroundStars: boolean;
+  /** Enable distance fog effects */
+  enableFog: boolean;
+
+  /** Enable performance mode (reduced visual quality) */
+  performanceMode: boolean;
+
+  /** Speed multiplier for orbital animations */
+  orbitalSpeed: number;
+  /** Multiplier for star/planet spacing from origin */
+  spacingFactor: number;
+}
+
+/**
+ * Default settings for the cosmos.
+ */
 export const DEFAULT_SETTINGS: SettingsState = {
-  // Dependency layers — direct + circular on, others off (reduces hairball on first open)
   showDirectLines: true,
   showIndirectLines: false,
   showLayer3Lines: false,
   showCircularLines: true,
 
-  // Animations — off by default (performance safety)
   enableAnimation: false,
   enableStarRotation: true,
   orbitalSpeed: 1.0,
   spacingFactor: 1.0,
 
-  // Data overlays
   showFolderLabels: true,
   showProximityLabels: true,
   showGitHeatmap: false,
   showMinimap: false,
   showLegend: true,
 
-  // Rendering
   showBackgroundStars: true,
   enableFog: true,
 
-  // Performance
   performanceMode: false,
 };
 
-// ---------------------------------------------------------------------------
-// Filter state (webview-local, not persisted to settings)
-// ---------------------------------------------------------------------------
-
+/**
+ * Local filter state for the webview.
+ */
 export interface FilterState {
+  /** Set of file types currently visible */
   visibleTypes: Set<FileType>;
 }
 
-// ---------------------------------------------------------------------------
-// Navigation persistence — camera bookmarks, home position, history.
-// Shared between .cosmos file schema (extension side) and the webview's
-// camera bookmark UI. Defined here so both sides import the same shape.
-// ---------------------------------------------------------------------------
-
+/**
+ * State of the 3D camera.
+ */
 export interface CameraState {
+  /** Camera position in 3D space */
   position: { x: number; y: number; z: number };
+  /** Look-at target position */
   target: { x: number; y: number; z: number };
 }
 
+/**
+ * A named camera position bookmark.
+ */
 export interface NamedCameraSlot {
+  /** Name given to the bookmark */
   name: string;
+  /** Camera state to restore */
   camera: CameraState;
 }
 
+/**
+ * Persistent navigation data.
+ */
 export interface NavigationData {
+  /** Default home position for the camera */
   homePosition: CameraState | null;
+  /** List of named camera bookmarks */
   namedSlots: NamedCameraSlot[];
+  /** History of recent camera states */
   cameraHistory: CameraState[];
 }
 
-// ---------------------------------------------------------------------------
-// Scan progress — reported during buildAllWorkspaces so the webview can show
-// a loading screen with a percentage rather than an indeterminate spinner.
-// ---------------------------------------------------------------------------
-
+/**
+ * Progress report for codebase scanning and parsing.
+ */
 export interface ScanProgressPayload {
-  percent: number; // 0-100, overall across all workspace folders
+  /** Completion percentage (0-100) */
+  percent: number;
+  /** Current phase of the operation */
   phase: 'scan' | 'parse' | 'git' | 'cache' | 'render';
-  message: string; // human-readable, e.g. "Parsing dependencies (120/450)"
+  /** Human-readable status message */
+  message: string;
 }
 
-// ---------------------------------------------------------------------------
-// Webview message protocol
-//
-// All messages between extension and webview are typed here.
-// Adding a new message: add it to the union type AND document it.
-// ---------------------------------------------------------------------------
-
+/**
+ * Union type for messages sent from the extension to the webview.
+ */
 export type MessageToWebview =
   | { type: 'LOAD_UNIVERSE'; payload: CosmosData }
   | { type: 'APPLY_SETTINGS'; payload: SettingsState }
   | { type: 'APPLY_NAVIGATION'; payload: NavigationData }
   | { type: 'FOCUS_FILE'; payload: { fileId: string } }
   | { type: 'SCAN_PROGRESS'; payload: ScanProgressPayload }
-  | {
-      type: 'COSMOS_STALE';
-      payload: {};
-      // Signals that the file system has changed since the last build.
-      // The webview should show a non-intrusive "refresh available" indicator.
-      // Cleared when LOAD_UNIVERSE is received.
-    };
+  | { type: 'COSMOS_STALE'; payload: {} };
 
+/**
+ * Union type for messages sent from the webview to the extension.
+ */
 export type MessageFromWebview =
   | { type: 'READY' }
   | { type: 'OPEN_FILE'; payload: { fileId: string; line?: number; character?: number } }
   | { type: 'SAVE_SETTINGS'; payload: SettingsState }
-  | {
-      type: 'SAVE_NAVIGATION';
-      payload: Partial<NavigationData>;
-      // Partial — the webview sends only the field(s) that changed
-      // (e.g. just namedSlots when a bookmark is added). CosmosPanel merges
-      // this into the existing .cosmos navigation data, preserving the rest.
-    }
+  | { type: 'SAVE_NAVIGATION'; payload: Partial<NavigationData> }
   | { type: 'REFRESH' }
   | { type: 'EXPORT_IMAGE'; payload: { dataUrl: string } };

@@ -8,9 +8,21 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for PHP files that identifies dependencies in include and require statements.
+ */
 export class PhpParser implements LanguageParser {
+  /**
+   * File extensions supported by this parser.
+   */
   extensions = ['php'];
 
+  /**
+   * Parses PHP content to find file dependencies.
+   *
+   * @param context The parser context containing file content and metadata.
+   * @returns An array of discovered dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

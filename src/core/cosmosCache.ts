@@ -42,24 +42,44 @@ const CACHE_FILENAME = '.cosmos.cache';
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Metadata for a single file in the manifest.
+ */
 export interface FileManifestEntry {
+  /** Size in bytes */
   size: number;
+  /** Last modified timestamp in milliseconds */
   mtimeMs: number;
 }
 
+/**
+ * A map of relative file paths to their manifest entries.
+ */
 export type FileManifest = Record<string, FileManifestEntry>;
 
+/**
+ * Complete structure of the .cosmos.cache file.
+ */
 export interface CosmosCacheData {
   version: number;
   projectId: string;
-  lastFullParse: string; // ISO timestamp
-  lastKnownGitHead: string | null; // null = git unavailable/not a repo
+  /** ISO timestamp of the last full parsing operation */
+  lastFullParse: string;
+  /** Git HEAD commit hash at the time of caching */
+  lastKnownGitHead: string | null;
+  /** Manifest of all files included in the cache */
   fileManifest: FileManifest;
-  data: CosmosData; // unprefixed — this workspace folder's own CosmosData
+  /** The cached cosmos data payload */
+  data: CosmosData;
 }
 
+/**
+ * Represents a workspace fingerprint for cache validation.
+ */
 export interface FingerprintResult {
+  /** Current manifest of files in the workspace */
   manifest: FileManifest;
+  /** Current git HEAD commit hash */
   gitHead: string | null;
 }
 
@@ -71,6 +91,10 @@ export interface FingerprintResult {
  * Read the .cosmos.cache file. Returns null if missing, corrupt, or version
  * mismatched — any of these mean "treat as cache miss, do a full rebuild".
  * Never throws.
+ *
+ * @param workspaceFolder - The VS Code workspace folder to read from.
+ * @param projectId - The project ID to validate against.
+ * @returns A promise resolving to CosmosCacheData or null.
  */
 export async function readCosmosCache(
   workspaceFolder: vscode.WorkspaceFolder,
@@ -104,6 +128,12 @@ export async function readCosmosCache(
 /**
  * Write the .cosmos.cache file. Silent on failure — caching is an optimisation,
  * never a requirement for correctness.
+ *
+ * @param workspaceFolder - The VS Code workspace folder to write to.
+ * @param projectId - The project ID to save.
+ * @param data - The complete CosmosData to cache.
+ * @param fingerprint - The current fingerprint associated with this data.
+ * @returns A promise that resolves when the cache is written.
  */
 export async function writeCosmosCache(
   workspaceFolder: vscode.WorkspaceFolder,
@@ -133,13 +163,13 @@ export async function writeCosmosCache(
 }
 
 /**
- * Compute the current "fingerprint" of the workspace: a file manifest
- * (size + mtime per file, via a fast directory walk — no AST parsing) and
- * the current git HEAD commit hash (via the VS Code git extension API,
- * no git log).
+ * Compute the current "fingerprint" of the workspace.
  *
- * This is the operation we run on every load to decide whether the cache
- * is still valid. It must stay cheap — that's the entire point.
+ * Includes a file manifest (size + mtime per file) and the current git HEAD commit hash.
+ * This is used to decide whether the cache is still valid.
+ *
+ * @param workspaceFolder - The VS Code workspace folder.
+ * @returns A promise resolving to the current FingerprintResult.
  */
 export async function computeFingerprint(
   workspaceFolder: vscode.WorkspaceFolder
@@ -152,8 +182,11 @@ export async function computeFingerprint(
 }
 
 /**
- * Compare two fingerprints. True if they describe the same workspace state —
- * same files, same sizes, same modification times, same git HEAD.
+ * Compare two fingerprints for equality.
+ *
+ * @param a - The first fingerprint.
+ * @param b - The second fingerprint.
+ * @returns True if they match exactly.
  */
 export function fingerprintsMatch(a: FingerprintResult, b: FingerprintResult): boolean {
   if (a.gitHead !== b.gitHead) {
@@ -175,9 +208,10 @@ export function fingerprintsMatch(a: FingerprintResult, b: FingerprintResult): b
 }
 
 /**
- * Deterministic project ID — same algorithm as cosmosFile.ts, kept in sync
- * so cache and preferences files agree on identity. Re-derived here rather
- * than imported to avoid a circular dependency between the two cache modules.
+ * Generates a deterministic project ID from a filesystem path.
+ *
+ * @param fsPath - The absolute filesystem path.
+ * @returns A unique string identifier.
  */
 export function makeProjectId(fsPath: string): string {
   let hash = 0;
@@ -193,10 +227,22 @@ export function makeProjectId(fsPath: string): string {
 // Internal: lightweight directory walk (stat only, no file content reads)
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalizes a path by replacing backslashes with forward slashes.
+ *
+ * @param p - The path string.
+ * @returns Normalized path.
+ */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/**
+ * Builds a lightweight manifest of all files in the workspace.
+ *
+ * @param workspaceFolder - The VS Code workspace folder.
+ * @returns A promise resolving to the FileManifest.
+ */
 async function buildLightManifest(workspaceFolder: vscode.WorkspaceFolder): Promise<FileManifest> {
   const workspaceRoot = workspaceFolder.uri.fsPath;
   const exclusions = await buildExclusionList(workspaceRoot);
@@ -259,6 +305,12 @@ async function buildLightManifest(workspaceFolder: vscode.WorkspaceFolder): Prom
 // is synchronous and free.
 // ---------------------------------------------------------------------------
 
+/**
+ * Gets the current git HEAD commit hash using the VS Code Git extension.
+ *
+ * @param workspaceRootFsPath - The absolute filesystem path to the workspace root.
+ * @returns A promise resolving to the commit hash or null.
+ */
 async function getCurrentGitHead(workspaceRootFsPath: string): Promise<string | null> {
   try {
     const gitExtension = vscode.extensions.getExtension('vscode.git');
@@ -280,6 +332,12 @@ async function getCurrentGitHead(workspaceRootFsPath: string): Promise<string | 
   }
 }
 
+/**
+ * Gets the absolute path to the .cosmos.cache file for a workspace.
+ *
+ * @param workspaceFolder - The VS Code workspace folder.
+ * @returns The absolute path string.
+ */
 function cacheFilePath(workspaceFolder: vscode.WorkspaceFolder): string {
   return path.join(workspaceFolder.uri.fsPath, CACHE_FILENAME);
 }

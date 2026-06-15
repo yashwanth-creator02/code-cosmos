@@ -2,15 +2,40 @@ import { CosmosDependency, DependencyType, DependencyReferenceKind } from '../..
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { resolveImport, getPosition } from './utils';
 
+/**
+ * Represents a regular expression pattern used to identify dependencies in JavaScript/TypeScript code.
+ */
 interface DependencyPattern {
+  /**
+   * The regex to match the dependency statement.
+   */
   regex: RegExp;
+  /**
+   * The type of dependency (e.g., IMPORT, REFERENCE).
+   */
   type: DependencyType;
+  /**
+   * Specific sub-kind of the dependency (e.g., STATIC_IMPORT, DYNAMIC_IMPORT).
+   */
   referenceKind: DependencyReferenceKind;
 }
 
+/**
+ * Parser for JavaScript and TypeScript files (including JSX/TSX).
+ * Supports ES modules, CommonJS, and various environment-specific patterns like Jest mocks.
+ */
 export class JavaScriptParser implements LanguageParser {
+  /**
+   * File extensions supported by this parser.
+   */
   extensions = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'];
 
+  /**
+   * Parses JavaScript/TypeScript content to find file dependencies.
+   *
+   * @param context The parser context containing file content and resolution settings.
+   * @returns An array of discovered dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, settings, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

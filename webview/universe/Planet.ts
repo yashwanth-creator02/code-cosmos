@@ -2,7 +2,10 @@
 
 import { FileType } from '../../src/types/index';
 
-// Color map — balanced, vibrant cosmic palette for dark backgrounds
+/**
+ * A mapping of file types to their corresponding hex colors for visual representation in the universe.
+ * Colors are chosen for high contrast and visibility against dark backgrounds.
+ */
 export const FILE_TYPE_COLORS: Record<FileType, number> = {
   // Deep sky cyan - highly visible, premium feel
   [FileType.TS]: 0x00d2ff,

@@ -7,9 +7,18 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { resolveImport, getPosition } from './utils';
 
+/**
+ * Parser for Python files to extract import dependencies.
+ */
 export class PythonParser implements LanguageParser {
+  /** Supported file extensions for this parser. */
   extensions = ['py'];
 
+  /**
+   * Parses Python content to find 'import' and 'from ... import' statements.
+   * @param context The parser context containing file content and settings.
+   * @returns An array of extracted dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, settings, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];
@@ -47,6 +56,11 @@ export class PythonParser implements LanguageParser {
     return deps;
   }
 
+  /**
+   * Converts a Python import path (with potential leading dots for relative imports) to a file path.
+   * @param importPath The Python import path.
+   * @returns The normalized file path representation.
+   */
   private pythonImportToPath(importPath: string): string {
     const leadingDots = importPath.match(/^\.+/)?.[0].length ?? 0;
     const importBody = importPath.replace(/^\.+/, '').replace(/\./g, '/');

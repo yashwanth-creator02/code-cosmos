@@ -8,9 +8,18 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for Ruby files to extract require and require_relative dependencies.
+ */
 export class RubyParser implements LanguageParser {
+  /** Supported file extensions for this parser. */
   extensions = ['rb'];
 
+  /**
+   * Parses Ruby content to find 'require' and 'require_relative' statements.
+   * @param context The parser context containing file content and settings.
+   * @returns An array of extracted dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

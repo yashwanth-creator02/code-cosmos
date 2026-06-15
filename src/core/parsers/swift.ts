@@ -8,9 +8,18 @@ import {
 import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 
+/**
+ * Parser for Swift files to extract import dependencies.
+ */
 export class SwiftParser implements LanguageParser {
+  /** Supported file extensions for this parser. */
   extensions = ['swift'];
 
+  /**
+   * Parses Swift content to find 'import' statements, excluding system frameworks.
+   * @param context The parser context containing file content and settings.
+   * @returns An array of extracted dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

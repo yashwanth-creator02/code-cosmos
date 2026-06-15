@@ -15,11 +15,26 @@ import {
 } from './utils';
 import * as path from 'path';
 
+/**
+ * List of HTML attributes that typically contain file references.
+ */
 const HTML_REFERENCE_ATTRIBUTES = ['src', 'href', 'poster', 'data-src', 'data-href', 'xlink:href'];
 
+/**
+ * Parser for HTML files that identifies dependencies in attributes like src, href, and srcset.
+ */
 export class HtmlParser implements LanguageParser {
+  /**
+   * File extensions supported by this parser.
+   */
   extensions = ['html'];
 
+  /**
+   * Parses HTML content to find file dependencies.
+   *
+   * @param context The parser context containing file content and metadata.
+   * @returns An array of discovered dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, settings, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];
@@ -85,6 +100,13 @@ export class HtmlParser implements LanguageParser {
     return deps;
   }
 
+  /**
+   * Parses a srcset attribute value into individual file paths.
+   *
+   * @param value The value of the srcset attribute.
+   * @returns An array of image URLs/paths found in the srcset.
+   * @private
+   */
   private parseSrcset(value: string): string[] {
     return value
       .split(',')
@@ -92,6 +114,16 @@ export class HtmlParser implements LanguageParser {
       .filter(Boolean);
   }
 
+  /**
+   * Resolves a reference path found in HTML to a file in the workspace.
+   *
+   * @param refPath The path string found in the HTML attribute.
+   * @param sourceFile The file containing the reference.
+   * @param settings Workspace settings for resolution.
+   * @param normalizedFileIds Map of normalized paths to file IDs.
+   * @returns The resolved target ID and resolution method, or null if not resolved.
+   * @private
+   */
   private resolveReferencePath(
     refPath: string,
     sourceFile: string,
@@ -114,6 +146,15 @@ export class HtmlParser implements LanguageParser {
     };
   }
 
+  /**
+   * Fallback resolution logic for HTML-specific path patterns (e.g., root-relative, common asset folders).
+   *
+   * @param refPath The path string found in the HTML attribute.
+   * @param sourceFile The file containing the reference.
+   * @param normalizedFileIds Map of normalized paths to file IDs.
+   * @returns The resolved file ID, or null if not found.
+   * @private
+   */
   private resolveHtmlPath(
     refPath: string,
     sourceFile: string,

@@ -24,20 +24,52 @@ import { CosmosDependency, DependencyLayer, DependencyType } from '../../src/typ
 // Higher = smoother, but more geometry. 12 is a good tradeoff.
 // ---------------------------------------------------------------------------
 
+/**
+ * The number of segments used to approximate the quadratic Bézier curve.
+ * Higher values result in smoother curves but increased geometry overhead.
+ */
 const CURVE_RESOLUTION = 12;
+
+/**
+ * The factor by which the curve is pulled toward the control point.
+ * 0 results in a straight line, while 1 collapses the curve to the control point.
+ */
 const CURVE_PULL = 0.45; // 0 = straight line, 1 = fully collapsed to control point
 
+/**
+ * Represents a visual dependency line between two planets in the 3D universe.
+ * Uses a quadratic Bézier curve to minimize visual clutter and bundle related dependencies.
+ */
 export class DependencyLine {
+  /** The THREE.Line object representing the curve in the scene. */
   public line: THREE.Line;
+
+  /** The underlying dependency data. */
   public dependency: CosmosDependency;
+
+  /** The base opacity of the line, determined by its dependency layer. */
   public readonly baseOpacity: number;
+
+  /** The base color of the line, determined by its dependency layer. */
   public readonly baseColor: THREE.Color;
 
-  // Mutable position refs for animation updates (orbital mode)
+  /** The starting position of the dependency line. */
   private startPos: THREE.Vector3;
+
+  /** The ending position of the dependency line. */
   private endPos: THREE.Vector3;
+
+  /** The control point position for the quadratic Bézier curve. */
   private controlPos: THREE.Vector3;
 
+  /**
+   * Creates a new DependencyLine instance.
+   *
+   * @param dependency The dependency data.
+   * @param startPosition The 3D position of the source planet.
+   * @param endPosition The 3D position of the target planet.
+   * @param controlHint Optional position of a shared parent star to pull the curve towards.
+   */
   constructor(
     dependency: CosmosDependency,
     startPosition: THREE.Vector3,
@@ -110,11 +142,12 @@ export class DependencyLine {
     this.line = new THREE.Line(geometry, material);
   }
 
-  // ---------------------------------------------------------------------------
-  // Build BufferGeometry for the quadratic Bézier curve
-  // B(t) = (1-t)² P0 + 2(1-t)t P1 + t² P2
-  // ---------------------------------------------------------------------------
-
+  /**
+   * Builds the BufferGeometry for the quadratic Bézier curve.
+   * Uses the formula: B(t) = (1-t)² P0 + 2(1-t)t P1 + t² P2
+   *
+   * @returns A THREE.BufferGeometry representing the curved line.
+   */
   private buildGeometry(): THREE.BufferGeometry {
     const positions = new Float32Array((CURVE_RESOLUTION + 1) * 3);
 
@@ -137,11 +170,14 @@ export class DependencyLine {
     return geometry;
   }
 
-  // ---------------------------------------------------------------------------
-  // Called from animate() when orbital animation is on — updates the curve
-  // endpoints while keeping the control point anchored to the star position.
-  // ---------------------------------------------------------------------------
-
+  /**
+   * Updates the curve endpoints and recalculates the Bézier geometry.
+   * Typically called during orbital animations when planets are moving.
+   *
+   * @param newStart The new 3D position for the start of the line.
+   * @param newEnd The new 3D position for the end of the line.
+   * @param controlHint Optional position of a shared parent star to pull the curve towards.
+   */
   public updateEndpoints(
     newStart: THREE.Vector3,
     newEnd: THREE.Vector3,

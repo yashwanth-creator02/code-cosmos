@@ -9,10 +9,21 @@ import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 import { JavaScriptParser } from './javascript';
 
+/**
+ * Parser for Svelte files to extract dependencies from scripts and components.
+ */
 export class SvelteParser implements LanguageParser {
+  /** Supported file extensions for this parser. */
   extensions = ['svelte'];
+
+  /** Internal JavaScript parser for processing script tags. */
   private jsParser = new JavaScriptParser();
 
+  /**
+   * Parses Svelte content to find dependencies in <script> tags and component usage in template.
+   * @param context The parser context containing file content and settings.
+   * @returns An array of extracted dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

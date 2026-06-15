@@ -42,28 +42,88 @@ type LoadUniverseMessage = { type: 'LOAD_UNIVERSE'; payload: CosmosData };
 // CosmosPanel — WebviewViewProvider
 // ---------------------------------------------------------------------------
 
+/**
+ * Manages the Code Cosmos webview panel in the VS Code sidebar.
+ * Implements the WebviewViewProvider interface to integrate with the Activity Bar.
+ */
 export class CosmosPanel implements vscode.WebviewViewProvider {
+  /**
+   * The unique identifier for the sidebar view.
+   */
   public static readonly viewType = 'codeCosmos.sidebarView';
+  /**
+   * The current active instance of the CosmosPanel.
+   */
   public static currentPanel: CosmosPanel | undefined;
 
+  /**
+   * The webview view instance provided by VS Code.
+   */
   private view: vscode.WebviewView | undefined;
+  /**
+   * The URI of the directory containing the extension.
+   */
   private readonly extensionUri: vscode.Uri;
+  /**
+   * The extension context.
+   */
   private readonly context: vscode.ExtensionContext;
 
+  /**
+   * The last load message sent to the webview.
+   */
   private lastLoadMessage: LoadUniverseMessage | null = null;
+  /**
+   * The last universe data sent to the webview.
+   */
   private lastUniverseData: CosmosData | null = null;
+  /**
+   * Whether the webview is ready to receive messages.
+   */
   private isReady = false;
+  /**
+   * A message pending to be sent once the webview is ready.
+   */
   private pendingMessage: LoadUniverseMessage | null = null;
+  /**
+   * Settings pending to be sent once the webview is ready.
+   */
   private pendingSettings: SettingsState | null = null;
+  /**
+   * Navigation data pending to be sent once the webview is ready.
+   */
   private pendingNavigation: NavigationData | null = null;
 
+  /**
+   * Callbacks to be executed when the panel is disposed.
+   */
   private disposeCallbacks: (() => void)[] = [];
+  /**
+   * Callbacks to be executed when the panel visibility changes.
+   */
   private visibilityChangeCallbacks: ((visible: boolean) => void)[] = [];
+  /**
+   * Callbacks to be executed when the panel becomes visible.
+   */
   private becomeVisibleCallbacks: (() => Promise<void>)[] = [];
+  /**
+   * Callbacks to be executed when the panel is first resolved.
+   */
   private firstResolveCallbacks: (() => Promise<void>)[] = [];
+  /**
+   * Whether the panel has been resolved at least once.
+   */
   private hasResolved = false;
+  /**
+   * Callback to be executed when a refresh is requested from the webview.
+   */
   private onRefreshCallback: (() => Promise<void>) | null = null;
 
+  /**
+   * Creates a new CosmosPanel instance.
+   * @param extensionUri The URI of the directory containing the extension.
+   * @param context The extension context.
+   */
   constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
     this.extensionUri = extensionUri;
     this.context = context;
@@ -76,6 +136,12 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   // createWebviewPanel() in the old tab-based approach.
   // ---------------------------------------------------------------------------
 
+  /**
+   * Resolves the webview view when it first becomes visible.
+   * @param webviewView The webview view to resolve.
+   * @param _context The context for resolving the webview view.
+   * @param _token A cancellation token.
+   */
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -207,6 +273,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   // Public API — same interface as before so extension.ts needs minimal changes
   // ---------------------------------------------------------------------------
 
+  /**
+   * Sends a message to the webview.
+   * @param message The message to send.
+   */
   public sendMessage(message: MessageToWebview): void {
     if (message.type === 'LOAD_UNIVERSE') {
       this.lastLoadMessage = message;
@@ -223,6 +293,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Gets the saved settings from global state.
+   * @returns The saved settings state.
+   */
   public getSavedSettings(): SettingsState {
     // Synchronous fallback — the async read happens in loadSettingsFromCosmosFile()
     // which is called before sendSettings() in loadAndSend().
@@ -234,6 +308,8 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
    * Async version — reads from the per-project .cosmos file.
    * Falls back to globalState (legacy), then defaults.
    * Called from loadAndSend() before sending LOAD_UNIVERSE.
+   * @param workspaceFolder The workspace folder to read settings for.
+   * @returns A promise that resolves to the settings state.
    */
   public async loadSettingsFromCosmosFile(
     workspaceFolder: vscode.WorkspaceFolder
@@ -250,6 +326,8 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   /**
    * Async — reads navigation data (camera bookmarks, home position, history)
    * from the per-project .cosmos file. Returns empty defaults if unavailable.
+   * @param workspaceFolder The workspace folder to read navigation data for.
+   * @returns A promise that resolves to the navigation data.
    */
   public async loadNavigationFromCosmosFile(
     workspaceFolder: vscode.WorkspaceFolder
@@ -262,6 +340,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Sends navigation data to the webview.
+   * @param navigation The navigation data to send.
+   */
   public sendNavigation(navigation: NavigationData): void {
     if (this.isReady && this.view) {
       this.view.webview.postMessage({ type: 'APPLY_NAVIGATION', payload: navigation });
@@ -270,6 +352,10 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Sends settings state to the webview.
+   * @param settings The settings state to send.
+   */
   public sendSettings(settings: SettingsState): void {
     if (this.isReady && this.view) {
       this.view.webview.postMessage({ type: 'APPLY_SETTINGS', payload: settings });
@@ -278,26 +364,49 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Registers a callback to be executed when the panel is first resolved.
+   * @param callback The callback function.
+   */
   public onFirstResolve(callback: () => Promise<void>): void {
     this.firstResolveCallbacks.push(callback);
   }
 
+  /**
+   * Registers a callback to be executed when the panel is disposed.
+   * @param callback The callback function.
+   */
   public onDispose(callback: () => void): void {
     this.disposeCallbacks.push(callback);
   }
 
+  /**
+   * Registers a callback to be executed when the panel visibility changes.
+   * @param callback The callback function.
+   */
   public onVisibilityChange(callback: (visible: boolean) => void): void {
     this.visibilityChangeCallbacks.push(callback);
   }
 
+  /**
+   * Registers a callback to be executed when the panel becomes visible.
+   * @param callback The callback function.
+   */
   public onBecomeVisible(callback: () => Promise<void>): void {
     this.becomeVisibleCallbacks.push(callback);
   }
 
+  /**
+   * Sets the callback to be executed when a refresh is requested.
+   * @param callback The callback function.
+   */
   public setRefreshCallback(callback: () => Promise<void>): void {
     this.onRefreshCallback = callback;
   }
 
+  /**
+   * Reveals the sidebar panel and focuses it.
+   */
   public reveal(): void {
     // Focus the sidebar panel — equivalent to old panel.reveal()
     vscode.commands.executeCommand('codeCosmos.sidebarView.focus');
@@ -307,6 +416,13 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Opens a file in the VS Code editor.
+   * @param fileId The ID of the file to open.
+   * @param line Optional line number.
+   * @param character Optional character position.
+   * @returns A promise that resolves when the file is opened.
+   */
   private async openFile(fileId: string, line?: number, character?: number): Promise<void> {
     const file = this.lastUniverseData?.files[fileId];
     if (!file) {
@@ -324,6 +440,11 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     await vscode.window.showTextDocument(vscode.Uri.file(file.path), options);
   }
 
+  /**
+   * Exports a screenshot of the webview as a PNG image.
+   * @param dataUrl The base64-encoded data URL of the image.
+   * @returns A promise that resolves when the image is exported.
+   */
   private async exportImage(dataUrl: string): Promise<void> {
     try {
       const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
@@ -339,7 +460,9 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
         title: 'Save Code Cosmos Screenshot',
       });
 
-      if (!uri) return;
+      if (!uri) {
+        return;
+      }
 
       await vscode.workspace.fs.writeFile(uri, buffer);
       const open = await vscode.window.showInformationMessage(
@@ -357,6 +480,11 @@ export class CosmosPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Generates the HTML content for the webview.
+   * @param webview The webview instance.
+   * @returns The HTML content as a string.
+   */
   private getHtmlContent(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'out', 'webview', 'main.js')

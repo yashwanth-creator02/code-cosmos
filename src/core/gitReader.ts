@@ -4,10 +4,27 @@ import { GitData, GitFileInfo } from '../types';
 import { logger } from '../utils/logger';
 import { ProgressCallback, noopProgress } from './progress';
 
+/**
+ * Normalizes a path by replacing backslashes with forward slashes.
+ *
+ * @param p - The path string to normalize.
+ * @returns The normalized path with forward slashes.
+ */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/**
+ * Reads git metadata for a set of files in a workspace.
+ *
+ * Fetches branch name, commit counts, last modification dates, and uncommitted changes
+ * using the VS Code built-in Git extension. Calculates a "heat" score for each file.
+ *
+ * @param workspaceRoot - The absolute path to the workspace root.
+ * @param fileIds - Array of file IDs (relative paths) to fetch git data for.
+ * @param onProgress - Optional callback to report progress.
+ * @returns A promise resolving to GitData for the workspace.
+ */
 export async function readGitData(
   workspaceRoot: string,
   fileIds: string[],

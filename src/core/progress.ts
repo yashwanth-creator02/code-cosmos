@@ -8,9 +8,22 @@
 // Kept as a plain callback (not an EventEmitter) so these core modules stay
 // framework-agnostic and easy to unit test without a VS Code context.
 
+/**
+ * Phases of the codebase scanning and parsing process.
+ */
 export type ScanPhase = 'scan' | 'parse' | 'git';
 
+/**
+ * Callback function used to report progress during long-running operations.
+ *
+ * @param phase - The current phase of the process.
+ * @param current - The number of items processed so far.
+ * @param total - The total number of items to process.
+ */
 export type ProgressCallback = (phase: ScanPhase, current: number, total: number) => void;
 
-/** No-op default so every call site can omit the callback safely. */
+/**
+ * No-op default progress callback that does nothing.
+ * Used as a default parameter so call sites can omit the callback safely.
+ */
 export const noopProgress: ProgressCallback = () => {};

@@ -23,6 +23,9 @@ import {
   NamedCameraSlot,
 } from '../../src/types';
 
+/**
+ * Visual configuration presets for the universe.
+ */
 const PRESETS = {
   clean: {
     showDirectLines: true,
@@ -77,13 +80,23 @@ const PRESETS = {
   },
 };
 
+/**
+ * Metadata and rendering state for a single planet.
+ */
 interface PlanetData {
+  /** The file data associated with this planet. */
   file: CosmosFile;
+  /** Current 3D position in the scene. */
   position: THREE.Vector3;
+  /** Index of this planet in the InstancedMesh. */
   instanceIndex: number;
-  scale: number; // current render scale (may be boosted by git churn)
-  baseScale: number; // intrinsic LOC-derived scale — never mutated after build
+  /** Current render scale (may be boosted by git churn). */
+  scale: number;
+  /** Intrinsic LOC-derived scale — never mutated after build. */
+  baseScale: number;
+  /** Hex color value based on file type. */
   color: number;
+  /** Whether the planet is currently visible in the scene. */
   visible: boolean;
 }
 
@@ -96,10 +109,21 @@ interface PlanetData {
 // both look enormous. Log base is tunable.
 // ---------------------------------------------------------------------------
 
-const PLANET_MIN_SCALE = 0.5; // smallest planet (tiny config files, assets)
-const PLANET_MAX_SCALE = 3.0; // largest planet before compression ring kicks in
-const PLANET_COMPRESS_BYTES = 100_000; // files larger than this get a compression ring
+/** Smallest planet scale (tiny config files, assets). */
+const PLANET_MIN_SCALE = 0.5;
+/** Largest planet scale before compression ring kicks in. */
+const PLANET_MAX_SCALE = 3.0;
+/** Files larger than this (in bytes) get a compression ring. */
+const PLANET_COMPRESS_BYTES = 100_000;
 
+/**
+ * Maps file size to a normalized scale value using a logarithmic curve.
+ *
+ * @param fileSize - The size of the file in bytes.
+ * @param minSize - The minimum file size in the current dataset.
+ * @param maxSize - The maximum file size in the current dataset.
+ * @returns A normalized scale value between PLANET_MIN_SCALE and PLANET_MAX_SCALE.
+ */
 function computePlanetScale(fileSize: number, minSize: number, maxSize: number): number {
   if (maxSize <= minSize) {
     return 1.0;
@@ -112,28 +136,54 @@ function computePlanetScale(fileSize: number, minSize: number, maxSize: number):
   return PLANET_MIN_SCALE + t * (PLANET_MAX_SCALE - PLANET_MIN_SCALE);
 }
 
+/**
+ * The main engine for the 3D visualization.
+ * Manages the THREE.js scene, camera, renderer, and interaction logic.
+ */
 export class Universe {
+  /** The THREE.js scene containing all objects. */
   private scene: THREE.Scene;
+  /** The perspective camera for viewing the universe. */
   private camera: THREE.PerspectiveCamera;
+  /** The WebGL renderer for the scene. */
   private renderer: THREE.WebGLRenderer;
+  /** Orbit controls for camera interaction. */
   private controls: OrbitControls;
+  /** Map of folder IDs to Star objects. */
   private stars: Map<string, Star> = new Map();
+  /** Map of file IDs to PlanetData objects. */
   private planets: Map<string, PlanetData> = new Map();
+  /** Instanced mesh used for rendering all planets efficiently. */
   private planetInstanceMesh: THREE.InstancedMesh | null = null;
+  /** Mapping from instance index in InstancedMesh to file ID. */
   private instanceToPlanet: Map<number, string> = new Map();
+  /** Array of dependency lines in the scene. */
   private lines: DependencyLine[] = [];
+  /** Raycaster for mouse interaction. */
   private raycaster = new THREE.Raycaster();
+  /** Normalized mouse coordinates. */
   private mouse = new THREE.Vector2();
+  /** The dataset currently being visualized. */
   private data: CosmosData | null = null;
+  /** List of all dependencies between files. */
   private dependencies: CosmosDependency[] = [];
+  /** ID of the file currently in focus mode. */
   private focusedFileId: string | null = null;
+  /** Default camera position for resetting. */
   private defaultCameraPosition = new THREE.Vector3(0, 0, 1200);
+  /** The central core mesh of the universe. */
   private centralCore: THREE.Mesh | null = null;
+  /** List of objects at the center of the universe. */
   private centralObjects: THREE.Object3D[] = [];
+  /** Whether the universe is in spacecraft pilot mode. */
   private spacecraftMode = false;
+  /** Tracked keyboard state for movement. */
   private keys: Record<string, boolean> = {};
+  /** Pitch angle for spacecraft mode. */
   private pitch = 0;
+  /** Yaw angle for spacecraft mode. */
   private yaw = 0;
+  /** Orbital animation data for planets. */
   private orbitalData: Map<
     string,
     {
@@ -144,47 +194,69 @@ export class Universe {
       radius: number;
     }
   > = new Map();
+  /** Sprite labels for stars (folders). */
   private starLabels: THREE.Sprite[] = [];
+  /** Sprite labels for planets (files). */
   private planetLabels: Map<string, THREE.Sprite> = new Map();
+  /** Distance within which planet labels are shown. */
   private readonly LABEL_SHOW_DISTANCE = 150;
+  /** Timestamp of the last mouse move event. */
   private lastMouseMoveTime = 0;
+  /** Current visual and performance settings. */
   private settings: SettingsState = { ...DEFAULT_SETTINGS };
+  /** Points object for background stars. */
   private backgroundStars: THREE.Points | null = null;
+  /** ID of the star currently in focus mode. */
   private focusedStarId: string | null = null;
+  /** Set of file extensions currently visible. */
   private visibleTypes: Set<string> = new Set();
+  /** Tracked performance mode state. */
   private lastPerformanceMode = false;
+  /** Git statistics for the repository. */
   private gitData: GitData | null = null;
+  /** Canvas for the minimap display. */
   private minimapCanvas: HTMLCanvasElement | null = null;
+  /** 2D context for the minimap canvas. */
   private minimapCtx: CanvasRenderingContext2D | null = null;
+  /** Whether the minimap is currently visible. */
   private minimapVisible = false;
+  /** Size of the world for minimap scaling. */
   private readonly MINIMAP_WORLD_SIZE = 1200;
+  /** Mesh rings for files with uncommitted changes. */
   private uncommittedRings: Map<string, THREE.Mesh> = new Map();
+  /** Mesh rings for large files (compressed scale). */
   private compressionRings: Map<string, THREE.Mesh> = new Map();
 
-  // Beacon chip — tracks the active editor file when camera drifts away from it
+  /** ID of the active file in the editor. */
   private beaconFileId: string | null = null;
+  /** Whether the beacon chip is currently visible. */
   private beaconVisible = false;
 
-  // Onboarding — shown on first launch, recallable via ? key
+  /** LocalStorage key for onboarding state. */
   private static readonly ONBOARDING_KEY = 'cosmos_onboarding_v1_seen';
+  /** Whether onboarding has been seen. */
   private onboardingSeen = false;
 
-  // Multi-select — shift-click accumulates selected planet IDs
+  /** Set of planet IDs currently multi-selected. */
   private selectedPlanetIds: Set<string> = new Set();
+  /** Highlight meshes for selected planets. */
   private selectionHighlights: Map<string, THREE.Mesh> = new Map();
 
-  // Path trace — active when exactly 2 planets are selected
+  /** Line objects for tracing paths between selected planets. */
   private pathTraceLines: THREE.Line[] = [];
 
-  // Camera bookmarks — up to MAX_BOOKMARKS named slots, persisted to the
-  // per-project .cosmos file via SAVE_NAVIGATION (see saveBookmark/deleteBookmark).
-  // Previously these lived only in localStorage and never reached .cosmos —
-  // that was the bug: bookmarks didn't survive across machines/clones and
-  // weren't visible in the .cosmos file the user inspects.
+  /** Max number of camera bookmarks allowed. */
   private static readonly MAX_BOOKMARKS = 5;
+  /** List of saved camera bookmarks. */
   private cameraBookmarks: NamedCameraSlot[] = [];
-  private navigationLoaded = false; // true once APPLY_NAVIGATION has been processed
+  /** Whether navigation data has been loaded from the extension. */
+  private navigationLoaded = false;
 
+  /**
+   * Initializes the Universe with a canvas and sets up the 3D scene.
+   *
+   * @param canvas - The HTML canvas element to render into.
+   */
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
     // Deep space color — slightly blue-tinted black feels more like space
@@ -285,6 +357,11 @@ export class Universe {
     this.animate();
   }
 
+  /**
+   * Disposes of a 3D object and its associated geometry and materials to free up GPU memory.
+   *
+   * @param object - The THREE.Object3D to dispose.
+   */
   private disposeSceneObject(object: THREE.Object3D): void {
     this.scene.remove(object);
     const disposable = object as THREE.Object3D & {
@@ -308,6 +385,12 @@ export class Universe {
     }
   }
 
+  /**
+   * Determines if the event target is a text input element.
+   *
+   * @param target - The event target to check.
+   * @returns True if the target is a text input, false otherwise.
+   */
   private isTextInputTarget(target: EventTarget | null): boolean {
     return (
       target instanceof HTMLInputElement ||
@@ -317,6 +400,12 @@ export class Universe {
     );
   }
 
+  /**
+   * Escapes HTML special characters in a string.
+   *
+   * @param value - The string to escape.
+   * @returns The escaped string.
+   */
   private escapeHtml(value: string): string {
     const replacements: Record<string, string> = {
       '&': '&amp;',
@@ -328,10 +417,23 @@ export class Universe {
     return value.replace(/[&<>"']/g, (char) => replacements[char]);
   }
 
+  /**
+   * Gets the directory portion of a relative path.
+   *
+   * @param relativePath - The full relative path.
+   * @param fileName - The name of the file.
+   * @returns The directory path.
+   */
   private getDirectoryLabel(relativePath: string, fileName: string): string {
     return relativePath.endsWith(fileName) ? relativePath.slice(0, -fileName.length) : relativePath;
   }
 
+  /**
+   * Builds the 3D visualization from the provided data.
+   * Clears any existing scene objects before building.
+   *
+   * @param data - The CosmosData containing folders, files, and dependencies.
+   */
   public build(data: CosmosData): void {
     this.gitData = data.gitData;
     this.data = data;
@@ -469,6 +571,14 @@ export class Universe {
     this.showOnboardingIfFirstLaunch();
   }
 
+  /**
+   * Updates the matrix and color of a planet instance in the InstancedMesh.
+   *
+   * @param index - The index of the instance to update.
+   * @param position - The new position of the planet.
+   * @param scale - The new scale of the planet.
+   * @param color - The new color of the planet.
+   */
   private updateInstance(
     index: number,
     position: THREE.Vector3,
@@ -485,6 +595,16 @@ export class Universe {
     this.planetInstanceMesh.setColorAt(index, new THREE.Color(color));
   }
 
+  /**
+   * Recursively builds the 3D hierarchy from a StarNode.
+   *
+   * @param node - The current node in the star tree.
+   * @param data - The full CosmosData.
+   * @param instanceIndex - The current starting index for planet instances.
+   * @param minFileSize - The minimum file size for scaling.
+   * @param maxFileSize - The maximum file size for scaling.
+   * @returns The next available instance index.
+   */
   private buildFromNode(
     node: StarNode,
     data: CosmosData,
@@ -572,6 +692,15 @@ export class Universe {
     return nextIndex;
   }
 
+  /**
+   * Computes the orbital position of a planet around a star using golden angle distribution.
+   *
+   * @param starPosition - The central position of the star.
+   * @param index - The index of the planet in the orbit.
+   * @param total - The total number of planets in this orbit.
+   * @param radius - The radius of the orbit.
+   * @returns An object containing the computed position, angle, and inclination.
+   */
   private orbitalPosition(
     starPosition: THREE.Vector3,
     index: number,
@@ -589,6 +718,11 @@ export class Universe {
     return { position, angle, inclination };
   }
 
+  /**
+   * Handles canvas resize events to update camera aspect ratio and renderer size.
+   *
+   * @param canvas - The HTML canvas element.
+   */
   private onResize(canvas: HTMLCanvasElement): void {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -601,6 +735,11 @@ export class Universe {
     this.renderer.setSize(width, height, false);
   }
 
+  /**
+   * Draws dependency lines between planets.
+   *
+   * @param dependencies - The list of dependencies to visualize.
+   */
   private drawDependencies(dependencies: CosmosDependency[]): void {
     const MAX_LINES = 2000;
     let lineCount = 0;
@@ -676,6 +815,12 @@ export class Universe {
     });
   }
 
+  /**
+   * Handles click events on the canvas for selection and navigation.
+   *
+   * @param event - The mouse event.
+   * @param canvas - The HTML canvas element.
+   */
   private onClick(event: MouseEvent, canvas: HTMLCanvasElement): void {
     if (this.spacecraftMode) {
       return;
@@ -796,6 +941,12 @@ export class Universe {
     }
   }
 
+  /**
+   * Handles context menu (right-click) events to show file actions.
+   *
+   * @param event - The mouse event.
+   * @param canvas - The HTML canvas element.
+   */
   private onContextMenu(event: MouseEvent, canvas: HTMLCanvasElement): void {
     event.preventDefault();
     if (this.spacecraftMode) {
@@ -964,6 +1115,12 @@ export class Universe {
     setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
+  /**
+   * Handles mouse move events to show tooltips and update interaction state.
+   *
+   * @param event - The mouse event.
+   * @param canvas - The HTML canvas element.
+   */
   private onMouseMove(event: MouseEvent, canvas: HTMLCanvasElement): void {
     const now = Date.now();
     const rect = canvas.getBoundingClientRect();
@@ -1095,6 +1252,12 @@ export class Universe {
     }
   }
 
+  /**
+   * Gets the label and color for a specific dependency layer.
+   *
+   * @param layer - The dependency layer.
+   * @returns An object with the label and color.
+   */
   private getLayerInfo(layer: DependencyLayer): { label: string; color: string } {
     switch (layer) {
       case DependencyLayer.DIRECT:
@@ -1112,6 +1275,11 @@ export class Universe {
     }
   }
 
+  /**
+   * Enters focus mode for a specific file, highlighting its direct connections.
+   *
+   * @param fileId - The ID of the file to focus on.
+   */
   private enterFocusMode(fileId: string): void {
     this.focusedFileId = fileId;
     // Show exit focus button
@@ -1156,6 +1324,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Exits focus mode and restores the original visual state.
+   */
   private exitFocusMode(): void {
     this.focusedFileId = null;
     const exitBtn = document.getElementById('exit-focus-btn');
@@ -1194,6 +1365,13 @@ export class Universe {
   // mode (Ctrl-clicking the same planet again).
   // ---------------------------------------------------------------------------
 
+  /**
+   * Shows a popup with actions for a specific planet.
+   *
+   * @param fileId - The ID of the file.
+   * @param clientX - The mouse X coordinate.
+   * @param clientY - The mouse Y coordinate.
+   */
   private showPlanetActionPopup(fileId: string, clientX: number, clientY: number): void {
     document.getElementById('planet-action-popup')?.remove();
 
@@ -1284,6 +1462,9 @@ export class Universe {
     setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
+  /**
+   * Initializes the search interface and keyboard shortcuts.
+   */
   private initSearch(): void {
     const container = document.getElementById('search-container')!;
     const input = document.getElementById('search-input') as HTMLInputElement;
@@ -1481,6 +1662,12 @@ export class Universe {
       }
     });
   }
+
+  /**
+   * Tracks a file that is active in the editor.
+   *
+   * @param fileId - The ID of the file to focus on.
+   */
   public focusOnFile(fileId: string): void {
     // Track which file is active in the editor — the beacon chip will
     // appear if this planet is off-screen, letting the developer choose
@@ -1493,6 +1680,11 @@ export class Universe {
     this.setBeaconVisible(false); // reset — updateBeaconChip re-evaluates next frame
   }
 
+  /**
+   * Smoothly animates the camera to a specific planet.
+   *
+   * @param fileId - The ID of the file to fly to.
+   */
   public flyToPlanet(fileId: string): void {
     const planet = this.planets.get(fileId);
     if (!planet) {
@@ -1522,6 +1714,11 @@ export class Universe {
     fly();
   }
 
+  /**
+   * Smoothly animates the camera to a specific star (folder).
+   *
+   * @param folderId - The ID of the folder to fly to.
+   */
   private flyToStar(folderId: string): void {
     const star = this.stars.get(folderId);
     if (!star) {
@@ -1550,10 +1747,16 @@ export class Universe {
     fly();
   }
 
+  /**
+   * Initializes the camera reset button.
+   */
   private initResetButton(): void {
     document.getElementById('reset-camera')!.addEventListener('click', () => this.resetCamera());
   }
 
+  /**
+   * Resets the camera to its default position and target.
+   */
   public resetCamera(): void {
     const startPosition = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
@@ -1579,6 +1782,9 @@ export class Universe {
     reset();
   }
 
+  /**
+   * Adds randomly distributed background stars to the scene.
+   */
   private addBackgroundStars(): void {
     if (this.backgroundStars) {
       this.scene.remove(this.backgroundStars);
@@ -1636,6 +1842,11 @@ export class Universe {
     this.scene.add(this.backgroundStars);
   }
 
+  /**
+   * Adds the central core and corona effects representing the root folder.
+   *
+   * @param rootFolder - The root folder of the workspace.
+   */
   private addCentralBody(rootFolder: CosmosFolder | undefined): void {
     if (!rootFolder) {
       return;
@@ -1718,6 +1929,14 @@ export class Universe {
     this.scene.add(label);
   }
 
+  /**
+   * Creates a sprite label for a star (folder).
+   *
+   * @param name - The name of the folder.
+   * @param position - The 3D position for the label.
+   * @param scaleWidth - The width of the label sprite.
+   * @returns The created THREE.Sprite label.
+   */
   private createStarLabel(
     name: string,
     position: THREE.Vector3,
@@ -1781,6 +2000,9 @@ export class Universe {
     return sprite;
   }
 
+  /**
+   * Initializes the spacecraft (pilot) mode controls and pointer lock.
+   */
   private initSpacecraftMode(): void {
     const MOVEMENT_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'shift']);
 
@@ -1847,6 +2069,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Updates the camera position and target based on spacecraft movement keys.
+   */
   private updateSpacecraft(): void {
     if (!this.spacecraftMode) {
       return;
@@ -1879,6 +2104,11 @@ export class Universe {
     this.controls.target.copy(this.camera.position.clone().add(forward.multiplyScalar(100)));
   }
 
+  /**
+   * Shows a visual indicator of the current camera mode.
+   *
+   * @param spacecraft - Whether spacecraft mode is active.
+   */
   private showModeIndicator(spacecraft: boolean): void {
     const indicator = document.getElementById('mode-indicator');
     if (!indicator) {
@@ -1895,6 +2125,10 @@ export class Universe {
     }, 3000);
   }
 
+  /**
+   * The main animation loop.
+   * Updates object positions, orientations, and renders the scene.
+   */
   private animate(): void {
     requestAnimationFrame(() => this.animate());
     const pulse = (Math.sin(Date.now() * 0.003) + 1) / 2;
@@ -2032,6 +2266,9 @@ export class Universe {
     this.drawMinimap();
   }
 
+  /**
+   * Updates the endpoints of all dependency lines to follow their planets.
+   */
   private updateDependencyLines(): void {
     this.lines.forEach((depLine) => {
       const s = this.planets.get(depLine.dependency.sourceId);
@@ -2062,8 +2299,6 @@ export class Universe {
 
   /**
    * Redraws path-trace overlay lines as their endpoint planets orbit.
-   * Path trace lines are plain THREE.Line with a position buffer attribute —
-   * we update the same buffer in-place rather than recreating geometries.
    */
   private updatePathTracePositions(): void {
     // Path trace lines store endpoint planet IDs in userData set during drawPathTrace
@@ -2104,6 +2339,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Initializes the help button and shortcuts panel.
+   */
   private initHelpButton(): void {
     const btn = document.getElementById('help-button')!;
     const panel = document.getElementById('shortcuts-panel')!;
@@ -2116,18 +2354,9 @@ export class Universe {
     btn.title = 'Keyboard shortcuts (H)';
   }
 
-  // ---------------------------------------------------------------------------
-  // Feature: Onboarding overlay
-  //
-  // Shown automatically on first launch (detected via localStorage flag).
-  // Recallable at any time by pressing ? (which previously opened the shortcuts
-  // panel — we keep shortcuts panel too, accessible via the help button).
-  //
-  // localStorage is used here because this is a purely client-side preference —
-  // it doesn't need to round-trip to the extension or the .cosmos file.
-  // The key is versioned (v1) so future redesigns can show it again.
-  // ---------------------------------------------------------------------------
-
+  /**
+   * Initializes the onboarding overlay and first-launch logic.
+   */
   private initOnboarding(): void {
     const overlay = document.getElementById('onboarding-overlay')!;
     const dismissBtn = document.getElementById('onboarding-dismiss')!;
@@ -2187,6 +2416,9 @@ export class Universe {
     // We hook into the build() method via a flag checked in showOnboardingIfFirstLaunch().
   }
 
+  /**
+   * Shows the onboarding guide if it's the first time the user is launching.
+   */
   public showOnboardingIfFirstLaunch(): void {
     if (!this.onboardingSeen) {
       const overlay = document.getElementById('onboarding-overlay');
@@ -2212,6 +2444,9 @@ export class Universe {
   // The proximity check runs in the animate loop via updateBeaconChip().
   // ---------------------------------------------------------------------------
 
+  /**
+   * Initializes the beacon chip for tracking off-screen active files.
+   */
   private initBeaconChip(): void {
     const chip = document.getElementById('beacon-chip')!;
     chip.addEventListener('click', () => {
@@ -2221,6 +2456,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Checks if the active file is off-screen and updates beacon visibility.
+   */
   private updateBeaconChip(): void {
     if (!this.beaconFileId || !this.data) {
       this.setBeaconVisible(false);
@@ -2249,6 +2487,11 @@ export class Universe {
     this.setBeaconVisible(isOffScreen);
   }
 
+  /**
+   * Sets the visibility of the beacon chip with a transition animation.
+   *
+   * @param visible - Whether the beacon should be visible.
+   */
   private setBeaconVisible(visible: boolean): void {
     if (visible === this.beaconVisible) {
       return;
@@ -2284,23 +2527,9 @@ export class Universe {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Feature: Multi-select + Path Trace
-  //
-  // Shift-click accumulates a set of selected planet IDs.
-  // Selection is visualised with a glowing selection ring around each planet.
-  //
-  // When exactly 2 planets are selected, path trace activates automatically:
-  //   1. Find the shortest dependency path between the two planets using BFS
-  //      across all dependency layers (direct first, then indirect).
-  //   2. Illuminate that path with bright gold Bézier lines on top of the
-  //      existing dependency lines.
-  //   3. Dim everything that isn't on the path.
-  //   4. Show a breadcrumb in the selection panel: A → B → C
-  //
-  // Escape or clicking empty space clears the selection.
-  // ---------------------------------------------------------------------------
-
+  /**
+   * Initializes multi-selection logic and onscreen Escape affordance.
+   */
   private initMultiSelect(): void {
     // Selection cleared by the unified Escape handler in initSearch.
     // Multi-select behaviour is handled in onClick (shift-click) and
@@ -2328,6 +2557,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Initializes the onscreen Escape button accessibility attributes.
+   */
   private initOnscreenEsc(): void {
     const btn = document.getElementById('onscreen-esc-btn');
     if (!btn) {
@@ -2339,6 +2571,11 @@ export class Universe {
     btn.setAttribute('title', 'Dismiss overlays');
   }
 
+  /**
+   * Toggles the selection state of a planet.
+   *
+   * @param fileId - The ID of the file to toggle selection for.
+   */
   private togglePlanetSelection(fileId: string): void {
     if (this.selectedPlanetIds.has(fileId)) {
       this.selectedPlanetIds.delete(fileId);
@@ -2358,6 +2595,11 @@ export class Universe {
     }
   }
 
+  /**
+   * Adds a visual selection highlight ring to a planet.
+   *
+   * @param fileId - The ID of the file to highlight.
+   */
   private addSelectionHighlight(fileId: string): void {
     if (this.selectionHighlights.has(fileId)) {
       return;
@@ -2382,6 +2624,11 @@ export class Universe {
     this.scene.add(ring);
   }
 
+  /**
+   * Removes the visual selection highlight from a planet.
+   *
+   * @param fileId - The ID of the file to remove highlighting from.
+   */
   private removeSelectionHighlight(fileId: string): void {
     const ring = this.selectionHighlights.get(fileId);
     if (ring) {
@@ -2392,6 +2639,9 @@ export class Universe {
     }
   }
 
+  /**
+   * Clears all planet selections and path trace lines.
+   */
   private clearSelection(): void {
     this.selectedPlanetIds.forEach((id) => this.removeSelectionHighlight(id));
     this.selectedPlanetIds.clear();
@@ -2399,16 +2649,12 @@ export class Universe {
     this.updateSelectionPanel();
   }
 
-  // ---------------------------------------------------------------------------
-  // Path trace: BFS through dependency graph to find shortest path A → B
-  //
-  // We search across all dependency layers but weight direct imports first.
-  // The algorithm builds an adjacency list from loaded dependencies, then
-  // runs standard BFS from source, stopping when it reaches the target.
-  // If no path exists, we look for a Closest Common Ancestor (CCA) —
-  // the file that both A and B directly or indirectly depend on.
-  // ---------------------------------------------------------------------------
-
+  /**
+   * Runs the path trace algorithm between two planets and visualizes the result.
+   *
+   * @param sourceId - The ID of the source file.
+   * @param targetId - The ID of the target file.
+   */
   private runPathTrace(sourceId: string, targetId: string): void {
     this.clearPathTrace(false); // clear lines but keep selection rings
 
@@ -2445,6 +2691,14 @@ export class Universe {
     }
   }
 
+  /**
+   * Finds the shortest path between two nodes in the dependency graph using BFS.
+   *
+   * @param adj - The adjacency list of the graph.
+   * @param from - The ID of the starting node.
+   * @param to - The ID of the target node.
+   * @returns An array of node IDs representing the path, or null if no path exists.
+   */
   private bfsPath(adj: Map<string, string[]>, from: string, to: string): string[] | null {
     const visited = new Set<string>([from]);
     const queue: string[][] = [[from]];
@@ -2465,6 +2719,14 @@ export class Universe {
     return null;
   }
 
+  /**
+   * Finds the closest common ancestor of two nodes in the dependency graph.
+   *
+   * @param adj - The adjacency list of the graph.
+   * @param a - The ID of the first node.
+   * @param b - The ID of the second node.
+   * @returns The ID of the closest common ancestor, or null if none exists.
+   */
   private findClosestCommonAncestor(
     adj: Map<string, string[]>,
     a: string,
@@ -2504,6 +2766,12 @@ export class Universe {
     return null;
   }
 
+  /**
+   * Visualizes a path through the dependency graph with colored Bézier lines.
+   *
+   * @param path - The array of node IDs in the path.
+   * @param color - The color to use for the path visualization.
+   */
   private drawPathTrace(path: string[], color: number): void {
     for (let i = 0; i < path.length - 1; i++) {
       const fromPlanet = this.planets.get(path[i]);
@@ -2558,6 +2826,11 @@ export class Universe {
     }
   }
 
+  /**
+   * Clears all path trace lines from the scene.
+   *
+   * @param clearPanel - Whether to also clear the path breadcrumb in the UI.
+   */
   private clearPathTrace(clearPanel = true): void {
     this.pathTraceLines.forEach((l) => {
       this.scene.remove(l);
@@ -2570,6 +2843,11 @@ export class Universe {
     }
   }
 
+  /**
+   * Displays the dependency path as a breadcrumb trail in the UI.
+   *
+   * @param path - The array of node IDs in the path, or null to clear.
+   */
   private showPathBreadcrumb(path: string[] | null): void {
     const panel = document.getElementById('selection-panel');
     if (!panel) {
@@ -2604,6 +2882,9 @@ export class Universe {
     }
   }
 
+  /**
+   * Updates the selection panel UI with the currently selected planets and path breadcrumb.
+   */
   private updateSelectionPanel(): void {
     let panel = document.getElementById('selection-panel');
 
@@ -2684,6 +2965,9 @@ export class Universe {
   // extension hasn't sent them yet at construction time.
   // ---------------------------------------------------------------------------
 
+  /**
+   * Initializes the camera bookmarks feature and keyboard shortcuts.
+   */
   private initCameraBookmarks(): void {
     // Render an empty bar immediately — applyNavigation() will populate it
     // once .cosmos data arrives from the extension (typically within one
@@ -2706,6 +2990,8 @@ export class Universe {
    * Called from main.ts when APPLY_NAVIGATION arrives — populates camera
    * bookmarks (and, in future, home position / camera history) from the
    * per-project .cosmos file.
+   *
+   * @param navigation - The navigation data to apply.
    */
   public applyNavigation(navigation: NavigationData): void {
     this.cameraBookmarks = navigation.namedSlots ?? [];
@@ -2714,10 +3000,8 @@ export class Universe {
   }
 
   /**
-   * Persist the current bookmark list to .cosmos via SAVE_NAVIGATION.
-   * Guarded by navigationLoaded — without this guard, an early save (e.g.
-   * before APPLY_NAVIGATION has arrived) could overwrite existing bookmarks
-   * in .cosmos with an empty array.
+   * Persists the current camera bookmarks to the extension.
+   * Guarded by navigationLoaded to prevent overwriting with empty data.
    */
   private persistBookmarks(): void {
     if (!this.navigationLoaded) {
@@ -2729,6 +3013,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Renders the bookmark bar UI with existing bookmarks and a "Save View" button.
+   */
   private renderBookmarkBar(): void {
     let bar = document.getElementById('bookmark-bar');
     if (!bar) {
@@ -2839,6 +3126,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Opens a dialog to name and save the current camera position as a bookmark.
+   */
   private saveBookmark(): void {
     if (this.cameraBookmarks.length >= Universe.MAX_BOOKMARKS) {
       this.cameraBookmarks.shift();
@@ -2955,6 +3245,11 @@ export class Universe {
     });
   }
 
+  /**
+   * Animates the camera to a saved bookmark position.
+   *
+   * @param idx - The index of the bookmark to fly to.
+   */
   private flyToBookmark(idx: number): void {
     const bm = this.cameraBookmarks[idx];
     if (!bm) {
@@ -2993,12 +3288,22 @@ export class Universe {
     fly();
   }
 
+  /**
+   * Deletes a camera bookmark.
+   *
+   * @param idx - The index of the bookmark to delete.
+   */
   private deleteBookmark(idx: number): void {
     this.cameraBookmarks.splice(idx, 1);
     this.persistBookmarks();
     this.renderBookmarkBar();
   }
 
+  /**
+   * Generates a default name for a new bookmark based on the nearest star.
+   *
+   * @returns A default name string.
+   */
   private getDefaultBookmarkName(): string {
     // Try to name after the nearest star to the camera's look target
     let closest: string | null = null;
@@ -3016,6 +3321,9 @@ export class Universe {
     return `View ${this.cameraBookmarks.length + 1}`;
   }
 
+  /**
+   * Updates visibility and opacity of planet labels based on camera proximity.
+   */
   private updateProximityLabels(): void {
     this.planets.forEach((planet, fileId) => {
       const distance = this.camera.position.distanceTo(planet.position);
@@ -3036,6 +3344,12 @@ export class Universe {
     });
   }
 
+  /**
+   * Creates a sprite label for a planet.
+   *
+   * @param name - The name of the file.
+   * @returns The created THREE.Sprite label.
+   */
   private createPlanetLabel(name: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
     canvas.width = 320;
@@ -3090,12 +3404,20 @@ export class Universe {
     return sprite;
   }
 
+  /**
+   * Applies new settings to the universe and updates the UI.
+   *
+   * @param settings - The new settings state.
+   */
   public applySettings(settings: SettingsState): void {
     this.settings = settings;
     this.syncPanelToSettings();
     this.applySettingsToScene();
   }
 
+  /**
+   * Updates the 3D scene and UI elements to reflect the current settings.
+   */
   private applySettingsToScene(): void {
     if (this.settings.performanceMode !== this.lastPerformanceMode) {
       this.lastPerformanceMode = this.settings.performanceMode;
@@ -3161,6 +3483,9 @@ export class Universe {
     }
   }
 
+  /**
+   * Initializes the settings panel UI and binds event listeners to controls.
+   */
   private initSettingsPanel(): void {
     const panel = document.getElementById('settings-panel')!;
     const btn = document.getElementById('settings-btn')!;
@@ -3231,6 +3556,11 @@ export class Universe {
     });
   }
 
+  /**
+   * Applies a predefined settings preset.
+   *
+   * @param preset - The name of the preset to apply.
+   */
   private applyPreset(preset: keyof typeof PRESETS): void {
     // Preserve spacingFactor — it's a personal layout preference independent
     // of the visual/performance preset being applied.
@@ -3240,6 +3570,9 @@ export class Universe {
     this.saveSettings();
   }
 
+  /**
+   * Synchronizes the settings panel UI controls with the current settings state.
+   */
   private syncPanelToSettings(): void {
     const set = (id: string, val: boolean) => {
       const el = document.getElementById(id) as HTMLInputElement;
@@ -3278,10 +3611,18 @@ export class Universe {
     }
   }
 
+  /**
+   * Persists the current settings to the extension.
+   */
   private saveSettings(): void {
     sendToExtension({ type: 'SAVE_SETTINGS', payload: this.settings });
   }
 
+  /**
+   * Enters focus mode for a specific star (folder), highlighting its files.
+   *
+   * @param folderId - The ID of the folder to focus on.
+   */
   private enterStarFocusMode(folderId: string): void {
     this.focusedStarId = folderId;
     const exitBtn = document.getElementById('exit-focus-btn');
@@ -3321,6 +3662,9 @@ export class Universe {
     });
   }
 
+  /**
+   * Exits star focus mode and restores the original visual state.
+   */
   private exitStarFocusMode(): void {
     this.focusedStarId = null;
     const exitBtn = document.getElementById('exit-focus-btn');
@@ -3344,10 +3688,17 @@ export class Universe {
     this.applySettingsToScene();
   }
 
+  /**
+   * Initializes the export button to capture scene images.
+   */
   private initExportButton(): void {
     document.getElementById('export-btn')?.addEventListener('click', () => this.exportImage());
   }
 
+  /**
+   * Captures a high-resolution image of the current 3D scene and sends it to the extension.
+   * Temporarily hides UI elements before capture.
+   */
   private exportImage(): void {
     const uiElements = [
       'tooltip',
@@ -3388,6 +3739,9 @@ export class Universe {
     }
   }
 
+  /**
+   * Initializes the refresh button to trigger a full universe rebuild.
+   */
   private initRefreshButton(): void {
     document.getElementById('refresh-universe')?.addEventListener('click', () => {
       sendToExtension({ type: 'REFRESH' });

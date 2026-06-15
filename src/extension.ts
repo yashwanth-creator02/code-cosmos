@@ -19,16 +19,37 @@ import { ProgressCallback, noopProgress } from './core/progress';
 // Constants
 // ---------------------------------------------------------------------------
 
+/**
+ * The spacing between different workspace "galaxies" in the 3D scene.
+ */
 const GALAXY_SPACING = 2000;
+/**
+ * The threshold for a "very large" repository, used for optimization warnings.
+ */
 const VERY_LARGE_REPO_THRESHOLD = 1000;
+/**
+ * The threshold for a "large" repository, used to prompt for performance mode.
+ */
 const LARGE_REPO_THRESHOLD = 500;
+/**
+ * The debounce time in milliseconds for rebuilding the cosmos after file changes.
+ */
 const REBUILD_DEBOUNCE_MS = 5000;
+/**
+ * File path prefixes to ignore when watching for changes.
+ */
 const EXCLUDED_WATCH_PREFIXES = ['node_modules', '.git', 'dist', 'build', 'out'];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Recursively prefixes all folder IDs in a StarNode tree.
+ * @param node The root node of the star tree.
+ * @param prefix The prefix to apply to folder IDs.
+ * @returns The updated StarNode tree.
+ */
 function prefixStarTree(node: StarNode, prefix: string): StarNode {
   return {
     ...node,
@@ -50,6 +71,14 @@ function prefixStarTree(node: StarNode, prefix: string): StarNode {
 // which doesn't change any file's mtime.
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds the file tree for a workspace folder, utilizing a cache if available and fresh.
+ * @param folder The workspace folder to build the tree for.
+ * @param offset The 3D offset for this folder's galaxy.
+ * @param forceRebuild Whether to bypass the cache and force a full rebuild.
+ * @param onProgress A callback to report build progress.
+ * @returns A promise that resolves to the cosmos data and a boolean indicating if it was from cache.
+ */
 async function buildFileTreeCached(
   folder: vscode.WorkspaceFolder,
   offset: { x: number; y: number; z: number },
@@ -105,6 +134,13 @@ async function buildFileTreeCached(
   return { data, fromCache: false };
 }
 
+/**
+ * Builds the cosmos data for all workspace folders.
+ * @param workspaceFolders The list of workspace folders to build.
+ * @param forceRebuild Whether to force a rebuild of all folders.
+ * @param onProgress A callback to report overall progress.
+ * @returns A promise that resolves to the combined cosmos data.
+ */
 export async function buildAllWorkspaces(
   workspaceFolders: readonly vscode.WorkspaceFolder[],
   forceRebuild = false,
@@ -190,6 +226,10 @@ export async function buildAllWorkspaces(
 // Extension lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * Activates the Code Cosmos extension.
+ * @param context The extension context.
+ */
 export function activate(context: vscode.ExtensionContext) {
   initLogger(context);
   logger.log('Code Cosmos activating');
@@ -223,6 +263,11 @@ export function activate(context: vscode.ExtensionContext) {
   // ---------------------------------------------------------------------------
   const PHASE_WEIGHTS = { scan: 0.05, parse: 0.55, git: 0.4, cache: 1, render: 1 };
 
+  /**
+   * Creates a progress callback that updates the webview with the current scan progress.
+   * @param fromCache Whether the data is being loaded from cache.
+   * @returns A ProgressCallback function.
+   */
   function makeProgressCallback(fromCache: boolean): ProgressCallback {
     let lastPercent = -1;
     return (phase, current, total) => {
@@ -253,7 +298,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       percent = Math.min(99, percent); // never hit 100 until LOAD_UNIVERSE lands
 
-      if (percent === lastPercent) return; // no-op duplicate
+      if (percent === lastPercent) {
+        return;
+      } // no-op duplicate
       lastPercent = percent;
 
       const phaseLabels: Record<string, string> = {
@@ -276,6 +323,11 @@ export function activate(context: vscode.ExtensionContext) {
   // ---------------------------------------------------------------------------
   // Helper: load data and push to panel
   // ---------------------------------------------------------------------------
+  /**
+   * Orchestrates the loading of cosmos data and sending it to the panel.
+   * @param forceRebuild Whether to force a full rebuild.
+   * @returns A promise that resolves when loading is complete.
+   */
   async function loadAndSend(forceRebuild = false): Promise<void> {
     if (workspaceFolders.length === 0) {
       vscode.window.showWarningMessage('Code Cosmos: No workspace folder is open.');
@@ -425,8 +477,13 @@ export function activate(context: vscode.ExtensionContext) {
   // ---------------------------------------------------------------------------
   let watcherSetup = false;
 
+  /**
+   * Sets up file watchers and editor listeners for synchronization.
+   */
   function setupWatcherAndListeners(): void {
-    if (watcherSetup) return;
+    if (watcherSetup) {
+      return;
+    }
     watcherSetup = true;
 
     cosmosPanel.setRefreshCallback(async () => {
@@ -472,17 +529,27 @@ export function activate(context: vscode.ExtensionContext) {
       }
     });
 
+    /**
+     * Handles file system change events.
+     * @param uri The URI of the changed file.
+     */
     const handleChange = (uri: vscode.Uri) => {
       const relativePath = vscode.workspace.asRelativePath(uri);
-      if (EXCLUDED_WATCH_PREFIXES.some((e) => relativePath.startsWith(e))) return;
+      if (EXCLUDED_WATCH_PREFIXES.some((e) => relativePath.startsWith(e))) {
+        return;
+      }
 
       logger.log(`File changed: ${relativePath}`);
       CosmosPanel.currentPanel?.sendMessage({ type: 'COSMOS_STALE', payload: {} });
       isStale = true;
 
-      if (!panelIsVisible) return;
+      if (!panelIsVisible) {
+        return;
+      }
 
-      if (debounceTimer) clearTimeout(debounceTimer);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
       debounceTimer = setTimeout(async () => {
         logger.log('Auto-rebuilding...');
         isStale = false;
@@ -496,7 +563,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     cosmosPanel.onDispose(() => {
       watcher.dispose();
-      if (debounceTimer) clearTimeout(debounceTimer);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
     });
 
     context.subscriptions.push(watcher);
@@ -505,6 +574,9 @@ export function activate(context: vscode.ExtensionContext) {
   logger.log('Code Cosmos activated');
 }
 
+/**
+ * Deactivates the Code Cosmos extension.
+ */
 export function deactivate() {
   logger.log('Code Cosmos deactivated');
 }

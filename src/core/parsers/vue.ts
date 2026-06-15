@@ -9,10 +9,20 @@ import { LanguageParser, ParserContext, createDirectDependency } from './types';
 import { normalizePath } from './utils';
 import { JavaScriptParser } from './javascript';
 
+/**
+ * Parser for Vue Single File Components (.vue).
+ * It extracts dependencies from both <script> blocks and <template> tags.
+ */
 export class VueParser implements LanguageParser {
+  /** File extensions supported by this parser. */
   extensions = ['vue'];
   private jsParser = new JavaScriptParser();
 
+  /**
+   * Parses a Vue file to extract dependencies.
+   * @param context The parser context.
+   * @returns A list of cosmos dependencies.
+   */
   parse(context: ParserContext): CosmosDependency[] {
     const { content, fileId, normalizedFileIds } = context;
     const deps: CosmosDependency[] = [];

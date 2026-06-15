@@ -13,6 +13,9 @@ import { VueParser } from './vue';
 import { SvelteParser } from './svelte';
 import { LanguageParser } from './types';
 
+/**
+ * Array of all available language parsers for dependency analysis.
+ */
 export const ALL_PARSERS: LanguageParser[] = [
   new JavaScriptParser(),
   new PythonParser(),
