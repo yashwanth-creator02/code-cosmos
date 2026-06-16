@@ -2,7 +2,7 @@
   "name": "code-cosmos",
   "displayName": "Code Cosmos",
   "description": "Explore your codebase as an interactive 3D universe. Files become planets, folders become stars, and dependencies become constellation lines. Navigate, focus, and understand any project at a glance.",
-  "version": "0.3.1",
+  "version": "0.3.0",
   "publisher": "Yashwanth",
   "license": "MIT",
   "icon": "assets/logo.png",
@@ -87,7 +87,7 @@
   "scripts": {
     "vscode:prepublish": "npm run typecheck && npm run compile && npm run build:webview",
     "start": "npm run compile && npm run build:webview && npm run format && npm run lint",
-    "compile": "node esbuild.extension.mjs",
+    "compile": "npm run clean && node esbuild.extension.mjs",
     "watch": "node esbuild.extension.mjs --watch",
     "pretest": "npm run typecheck && npm run compile && npm run lint",
     "lint": "eslint src ",
@@ -95,7 +95,8 @@
     "build:webview": "vite build",
     "watch:webview": "vite build --watch",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit -p ./"
+    "typecheck": "tsc --noEmit -p ./",
+    "clean": "rimraf out"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -113,7 +114,8 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.13",
     "vitest": "^4.1.6",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.0",
+    "rimraf": "^6.0.1"
   },
   "dependencies": {
     "minimatch": "^10.2.5",
