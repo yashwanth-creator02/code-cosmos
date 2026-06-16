@@ -2,7 +2,7 @@
   "name": "code-cosmos",
   "displayName": "Code Cosmos",
   "description": "Explore your codebase as an interactive 3D universe. Files become planets, folders become stars, and dependencies become constellation lines. Navigate, focus, and understand any project at a glance.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "Yashwanth",
   "license": "MIT",
   "icon": "assets/logo.png",
