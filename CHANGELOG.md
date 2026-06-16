@@ -5,19 +5,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
-
-### Changed
-
-**Build output cleaned before every compile**
-
-- `npm run compile` now runs `rimraf out` before bundling, removing stale per-module `.js` files left over from earlier `tsc`-based builds
-- Added `clean` script (`rimraf out`) and `rimraf` as a dev dependency
-- `watch` deliberately does NOT run `clean` first — wiping `out/` on every save would break iterative development
-- Result: the packaged `.vsix` now contains only `out/extension.js` + sourcemap and `out/webview/main.js` + sourcemap, instead of also including redundant individually-compiled files under `out/core/`, `out/panel/`, `out/types/`, `out/utils/`
-
----
-
 ## [0.3.1] — 2026-06-16
 
 ### Fixed
@@ -29,6 +16,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added `esbuild.extension.mjs` — bundles `src/extension.ts` and everything it imports (including `p-limit` and `minimatch`) into a single `out/extension.js`, with `vscode` kept external since VS Code injects that module itself at runtime
 - `compile` script now runs the esbuild bundler instead of raw `tsc`
 - Added a separate `typecheck` script (`tsc --noEmit`) so type errors are still caught even though `tsc` no longer produces the runtime output — wired into `vscode:prepublish` and `pretest` so this class of bug can't ship silently again
+
+### Changed
+
+**Build output cleaned before every compile**
+
+- `npm run compile` now runs `rimraf out` before bundling, removing stale per-module `.js` files left over from earlier `tsc`-based builds
+- Added `clean` script (`rimraf out`) and `rimraf` as a dev dependency
+- `watch` deliberately does NOT run `clean` first — wiping `out/` on every save would break iterative development
+- Result: the packaged `.vsix` now contains only `out/extension.js` + sourcemap and `out/webview/main.js` + sourcemap, instead of also including redundant individually-compiled files under `out/core/`, `out/panel/`, `out/types/`, `out/utils/`
 
 ---
 
@@ -168,9 +164,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Live file watcher — cosmos refreshes when files are added, deleted, or changed
 - `.cosmosignore` — exclude files and folders using glob patterns
 - Onboarding overlay on first launch
-
----
-
-## [Unreleased]
-
-See [ROADMAP](https://github.com/yashwanth-creator02/code-cosmos#roadmap) for planned features.

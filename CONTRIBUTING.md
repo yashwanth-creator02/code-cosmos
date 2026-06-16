@@ -131,19 +131,30 @@ npm install
 npm run compile
 ```
 
-This runs `tsc` (extension host) and Vite (WebView bundle) in parallel. Output goes to `out/`.
+This runs `npm run clean` to wipe the `out/` directory, then bundles the extension host using esbuild.
+
+```bash
+npm run build:webview
+```
+
+This bundles the WebView using Vite.
+
+Output for both goes to `out/`.
 
 ### Launch in VS Code
 
 Open the project in VS Code and press `F5`. This opens a new VS Code window (Extension Development Host) with the extension loaded. The cosmos icon appears in the Activity Bar of that window.
 
-Any change to `src/` or `webview/` requires re-running `npm run compile` (or use `npm run watch` for automatic recompilation).
+Any change to `src/` or `webview/` requires re-running the respective build command (or use `npm run watch` / `npm run watch:webview` for automatic recompilation).
 
 ### Useful commands
 
 ```bash
-npm run compile          # Full build
-npm run watch            # Watch mode (recompiles on change)
+npm run compile          # Clean and bundle extension host
+npm run build:webview    # Bundle WebView
+npm run clean            # Remove the out/ directory
+npm run watch            # Watch mode for extension host
+npm run watch:webview    # Watch mode for WebView
 npm run lint             # ESLint
 npm run typecheck        # tsc --noEmit only
 ```
